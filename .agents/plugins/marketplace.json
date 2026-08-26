@@ -1,0 +1,14 @@
+{
+  "name": "ralph-wiggum",
+  "interface": {
+    "displayName": "Ralph Wiggum"
+  },
+  "plugins": [
+    {
+      "name": "ralph-wiggum",
+      "source": "./",
+      "description": "Autonomous development loop plugin implementing the Ralph Technique",
+      "category": "developer-tools"
+    }
+  ]
+}

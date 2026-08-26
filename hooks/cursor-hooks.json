@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "stop": [
+      {
+        "command": "${CURSOR_PLUGIN_ROOT:-.}/scripts/stop-hook.sh",
+        "loop_limit": 25,
+        "timeout": 120
+      }
+    ]
+  }
+}

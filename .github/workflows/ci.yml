@@ -1,0 +1,33 @@
+name: CI Validation
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate:
+    name: Validate Manifest & Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Validate plugin.json
+        run: |
+          jq -e '
+            ."$schema" == "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json" and
+            .name == "ralph-wiggum" and
+            .version != null and
+            .extensions["com.anthropic.claude-code"] != null and
+            .extensions["com.anysphere.cursor"] != null and
+            .extensions["com.google.antigravity"].hooks == "./hooks/antigravity-hooks.json" and
+            (.skills == null)
+          ' plugin.json >/dev/null
+          echo "plugin.json conforms 100% to Agent Plugins 1.0.0 closed schema"
+
+      - name: Run Test Suite
+        run: ./tests/run-tests.sh

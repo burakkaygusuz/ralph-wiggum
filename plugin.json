@@ -1,0 +1,34 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "ralph-wiggum",
+  "version": "1.0.0",
+  "description": "Autonomous, iterative, self-referential AI development loop.",
+  "author": {
+    "name": "Burak Kaygusuz"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "agent-plugin",
+    "ralph-wiggum",
+    "autonomous-loop"
+  ],
+  "extensions": {
+    "com.anthropic.claude-code": {
+      "hooks": "./hooks/hooks.json",
+      "commands": "./commands"
+    },
+    "com.anysphere.cursor": {
+      "hooks": "./hooks/cursor-hooks.json",
+      "rules": "./rules"
+    },
+    "com.openai.codex": {
+      "hooks": "./hooks/hooks.json"
+    },
+    "com.google.antigravity": {
+      "hooks": "./hooks/antigravity-hooks.json"
+    },
+    "com.github.copilot": {
+      "hooks": "./hooks/hooks.json"
+    }
+  }
+}

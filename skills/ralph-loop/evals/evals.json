@@ -1,0 +1,65 @@
+{
+  "skill_name": "ralph-loop",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Run a ralph loop to implement user authentication with JWT, add unit tests, and output <promise>AUTH_DONE</promise> when all pass. Max 20 iterations.",
+      "should_trigger": true,
+      "expected_output": "Initializes Ralph loop with max_iterations=20 and completion_promise='AUTH_DONE', then iterates autonomously until verified."
+    },
+    {
+      "id": 2,
+      "prompt": "Start iterative development on refactoring the billing service until npm test passes cleanly.",
+      "should_trigger": true,
+      "expected_output": "Initializes Ralph loop for autonomous iterative refactoring and verification."
+    },
+    {
+      "id": 3,
+      "prompt": "Can you explain how the Ralph Wiggum technique works and how completion promises prevent infinite loops?",
+      "should_trigger": false,
+      "expected_output": "Triggers ralph-loop-help or provides conceptual guidance without starting an active loop."
+    },
+    {
+      "id": 4,
+      "prompt": "Fix typo in README line 4",
+      "should_trigger": false,
+      "expected_output": "Applies a one-shot fix directly without initializing an autonomous loop."
+    },
+    {
+      "id": 5,
+      "prompt": "Cancel the running loop right now",
+      "should_trigger": false,
+      "expected_output": "Triggers cancel-ralph to clean state and abort the active loop."
+    },
+    {
+      "id": 6,
+      "prompt": "Run a test-driven development loop to create a binary search tree in Rust with complete test coverage. Stop with <promise>BST_READY</promise>.",
+      "should_trigger": true,
+      "expected_output": "Initializes Ralph loop with Rust TDD protocol and completion promise."
+    },
+    {
+      "id": 7,
+      "prompt": "Can you run a bash while loop to check if the server on port 8080 is responding?",
+      "should_trigger": false,
+      "expected_output": "Executes a simple bash command/poll directly without starting a Ralph autonomous agent loop."
+    },
+    {
+      "id": 8,
+      "prompt": "Keep running cargo check and fixing compiler warnings across src/ until zero warnings remain.",
+      "should_trigger": true,
+      "expected_output": "Initializes Ralph loop with cargo check backpressure."
+    },
+    {
+      "id": 9,
+      "prompt": "What are the latest changes in git status?",
+      "should_trigger": false,
+      "expected_output": "Runs git status once directly without initializing a loop."
+    },
+    {
+      "id": 10,
+      "prompt": "Execute an iterative TDD cycle for implementing OAuth2 refresh token rotation in src/auth.ts with vitest verification.",
+      "should_trigger": true,
+      "expected_output": "Initializes Ralph loop with vitest test command and TDD cycle."
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "description": "Ralph Wiggum autonomous loop interceptor hook",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT:-.}/scripts/stop-hook.sh",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}

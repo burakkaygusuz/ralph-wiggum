@@ -1,0 +1,11 @@
+{
+  "ralph-loop-stop": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "./scripts/stop-hook.sh",
+        "timeout": 120
+      }
+    ]
+  }
+}
