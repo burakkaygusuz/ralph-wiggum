@@ -2,8 +2,6 @@
 set -euo pipefail
 umask 077
 
-command -v jq >/dev/null || { echo "Error: Ralph loop requires jq." >&2; exit 1; }
-
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "Error: Ralph loop must run inside a git repository." >&2; exit 1; }
 cd "$PROJECT_ROOT"
 EXCLUDE_FILE="$(git rev-parse --git-path info/exclude)"
@@ -58,9 +56,9 @@ if [[ "$COMPLETION_PROMISE$TEST_CMD" == *$'\n'* ]]; then
   exit 1
 fi
 
-# The stop hook trims whitespace inside <promise> tags and never unescapes, so these promises could never match
-if [[ "$COMPLETION_PROMISE" == *[\<\\]* ]] || [[ "$COMPLETION_PROMISE" =~ ^[[:space:]]|[[:space:]]$ ]]; then
-  echo "Error: --completion-promise cannot contain '<' or '\\', and cannot start or end with whitespace" >&2
+# The stop hook trims whitespace inside <promise> tags and matches the raw JSON text, where these characters are escaped differently
+if [[ "$COMPLETION_PROMISE" == *[\<\\\"\&[:cntrl:]]* ]] || [[ "$COMPLETION_PROMISE" =~ ^[[:space:]]|[[:space:]]$ ]]; then
+  echo "Error: --completion-promise cannot contain '<', '\\', '\"', '&' or control characters, and cannot start or end with whitespace" >&2
   exit 1
 fi
 
