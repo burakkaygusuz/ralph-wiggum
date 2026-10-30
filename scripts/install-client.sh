@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Multi-Client Agent Skills Symlinker
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TARGET="${1:-all}"
 SKILLS=("ralph-loop" "cancel-ralph" "ralph-loop-help")

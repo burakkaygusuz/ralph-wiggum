@@ -11,7 +11,7 @@ description: Run an autonomous, iterative development loop using the Ralph Wiggu
 
 - `PROMPT` (required): Task description, architecture requirements, and acceptance criteria.
 - `--max-iterations <N>` (optional, default: 10): Safety ceiling on turns (0 for unbounded).
-- `--completion-promise '<TEXT>'` (optional): Exact string in `<promise>TEXT</promise>` required to stop. Without it, `<promise>COMPLETE</promise>` or `<promise>DONE</promise>` is accepted. Setup rejects TEXT containing `<` or `\`, or with leading/trailing whitespace, because the stop hook could never match it.
+- `--completion-promise '<TEXT>'` (optional): Exact string in `<promise>TEXT</promise>` required to stop. Without it, `<promise>COMPLETE</promise>` or `<promise>DONE</promise>` is accepted. Setup rejects TEXT containing `<`, `\`, `"`, `&` or control characters, or with leading/trailing whitespace, because the stop hook could never match it.
 - `--test-cmd '<CMD>'` (optional): Command executed deterministically by stop hook before accepting completion.
 - `--force` (optional): Override an existing active Ralph loop state.
 

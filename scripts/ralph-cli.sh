@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-command -v jq >/dev/null || { echo "Error: Ralph loop requires jq." >&2; exit 1; }
-
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 STATE_DIR="$PROJECT_ROOT/.ralph"
 STATE_FILE="$STATE_DIR/state.env"
@@ -12,6 +10,7 @@ PLAN_FILE="${1:-$STATE_DIR/fix_plan.md}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_BIN="${AGENT_BIN:-claude}"
 STOP_HOOK="$SCRIPT_DIR/stop-hook.sh"
+source "$SCRIPT_DIR/lib/json.sh"
 
 [[ ! -f "$PLAN_FILE" || ! -f "$STATE_FILE" ]] && { echo "Error: Ralph loop not initialized. Run ${SCRIPT_DIR}/setup-ralph-loop.sh first." >&2; exit 1; }
 
@@ -74,9 +73,11 @@ while :; do
   echo "$OUTPUT"
 
   HOOK_ERR_FILE="$(mktemp)"
-  HOOK_RESULT=$(printf '%s' "$OUTPUT" | jq -Rs '{last_assistant_message: .}' | RALPH_CLI_AGENT= "$STOP_HOOK" 2>"$HOOK_ERR_FILE" || true)
+  FEEDBACK_FILE="$(mktemp)"
+  printf '{"last_assistant_message":%s}' "$(printf '%s' "$OUTPUT" | json_str)" | RALPH_CLI_AGENT= RALPH_FEEDBACK_FILE="$FEEDBACK_FILE" "$STOP_HOOK" >/dev/null 2>"$HOOK_ERR_FILE" || true
   HOOK_ERR="$(cat "$HOOK_ERR_FILE")"
-  rm -f "$HOOK_ERR_FILE"
+  FEEDBACK="$(cat "$FEEDBACK_FILE")"
+  rm -f "$HOOK_ERR_FILE" "$FEEDBACK_FILE"
   [[ -n "$HOOK_ERR" ]] && echo "$HOOK_ERR" >&2
 
   if [[ ! -f "$STATE_FILE" ]]; then
@@ -96,7 +97,6 @@ while :; do
     break
   fi
 
-  FEEDBACK="$(jq -r '.reason // empty' <<< "$HOOK_RESULT" 2>/dev/null || true)"
   CURRENT_PROMPT="${FEEDBACK:-$(cat "$PLAN_FILE")}"
 done
 

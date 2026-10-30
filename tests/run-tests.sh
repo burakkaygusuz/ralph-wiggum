@@ -3,7 +3,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 chmod +x "$ROOT"/scripts/*.sh
+unset CLAUDE_PROJECT_DIR RALPH_FEEDBACK_FILE
 unset RALPH_CLI_AGENT # hermetic: an inherited value would silence the hook in every test
+command -v jq >/dev/null || { echo "Error: the test suite needs jq to check hook output (the plugin itself does not)." >&2; exit 1; }
 
 PASSED=0
 FAILED=0
@@ -127,7 +129,7 @@ test_claude_stop_hook() {
   "$ROOT/scripts/setup-ralph-loop.sh" "Claude task" --completion-promise "CLAUDE_DONE"
   local res
   res=$(echo '{"last_assistant_message": "Working on steps..."}' | "$ROOT/scripts/stop-hook.sh")
-  grep -q '"decision": "block"' <<< "$res"
+  jq -e '.decision == "block"' <<< "$res" >/dev/null
   grep -q "ITERATION=2" .ralph/state.env
 
   perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
@@ -143,7 +145,7 @@ test_nested_cwd_independence() {
     cd src/nested/dir
     local nested_out
     nested_out=$(echo '{"last_assistant_message": "Working in nested dir"}' | "$ROOT/scripts/stop-hook.sh")
-    grep -q '"decision": "block"' <<< "$nested_out"
+    jq -e '.decision == "block"' <<< "$nested_out" >/dev/null
   )
   test -f .ralph/state.env
   grep -q "ITERATION=2" .ralph/state.env
@@ -161,7 +163,6 @@ test_single_iteration_max_completion() {
 test_anti_cheating_and_plan_integrity() {
   "$ROOT/scripts/setup-ralph-loop.sh" "Integrity test task" --max-iterations 3 --completion-promise "INTEGRITY_DONE"
   cat <<EOF > .ralph/fix_plan.md
-# Plan
 - [x] Only 1 task
 EOF
   local ch_out
@@ -198,7 +199,7 @@ test_copilot_stop_hook() {
   local copilot_out
   copilot_out=$(echo "{\"TranscriptPath\": \"$transcript\", \"StopHookActive\": true}" | "$ROOT/scripts/stop-hook.sh")
   # Promise in the transcript file is not the stop payload, so it must not complete the loop
-  grep -q '"decision": "block"' <<< "$copilot_out"
+  jq -e '.decision == "block"' <<< "$copilot_out" >/dev/null
   test -d .ralph
   "$ROOT/scripts/cancel-ralph.sh"
 }
@@ -251,7 +252,7 @@ test_deleted_test_integrity_guard() {
   rm inspector.ts
   local out
   out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh")
-  grep -q '"decision": "block"' <<< "$out"
+  jq -e '.decision == "block"' <<< "$out" >/dev/null
   if grep -q "Test Integrity Guard Alert" <<< "$out"; then
     return 1
   fi
@@ -358,7 +359,7 @@ test_leading_zero_max_iterations_is_decimal() {
   grep -q "^MAX_ITERATIONS=9$" .ralph/state.env
   local out
   out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh" 2>&1)
-  grep -q '"decision": "block"' <<< "$out"
+  jq -e '.decision == "block"' <<< "$out" >/dev/null
 }
 
 test_unlimited_and_untested_messages_are_clean() {
@@ -523,7 +524,7 @@ test_agent_written_cli_pid_does_not_gate_hook() {
   echo "$$" > .ralph/cli.pid
   local out
   out=$(echo '{"last_assistant_message": "working"}' | "$ROOT/scripts/stop-hook.sh")
-  grep -q '"decision": "block"' <<< "$out"
+  jq -e '.decision == "block"' <<< "$out" >/dev/null
   grep -q "^ITERATION=2$" .ralph/state.env
 }
 
@@ -534,7 +535,7 @@ test_state_dir_is_excluded_from_git() {
   test -z "$(git ls-files .ralph)"
   local out
   out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh")
-  grep -q '"decision": "block"' <<< "$out"
+  jq -e '.decision == "block"' <<< "$out" >/dev/null
   grep -q "^ITERATION=2$" .ralph/state.env
 }
 
@@ -547,18 +548,6 @@ test_hook_is_silent_outside_git() {
   rm -rf "$plain" "$err"
   test -z "$out"
   test ! -s "$err"
-}
-
-test_missing_jq_fails_before_advancing() {
-  "$ROOT/scripts/setup-ralph-loop.sh" "Jq task" --max-iterations 3
-  local bin="$PWD/bin" out status=0
-  mkdir "$bin"
-  ln -s "$(command -v git)" "$bin/git"
-  ln -s "$(command -v cat)" "$bin/cat"
-  out=$(echo '{"last_assistant_message": "Working"}' | PATH="$bin" "$(command -v bash)" "$ROOT/scripts/stop-hook.sh" 2>&1) || status=$?
-  test "$status" -ne 0
-  grep -q "jq is required" <<< "$out"
-  grep -q "^ITERATION=1$" .ralph/state.env
 }
 
 test_committed_test_deletion_is_caught() {
@@ -589,7 +578,7 @@ test_bare_state_line_is_ignored() {
   echo "TEST_COMMAND" >> .ralph/state.env
   local out
   out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh")
-  grep -q '"decision": "block"' <<< "$out"
+  jq -e '.decision == "block"' <<< "$out" >/dev/null
   if grep -q "Automated Verification" <<< "$out"; then
     return 1
   fi
@@ -619,9 +608,9 @@ test_diff_failure_blocks_verification() {
   sed 's/^BASE_COMMIT=.*/BASE_COMMIT=deadbeef/' .ralph/state.env > state.tmp && mv state.tmp .ralph/state.env
   sed 's/- \[ \]/- [x]/' .ralph/fix_plan.md > plan.tmp && mv plan.tmp .ralph/fix_plan.md
   local out
-  out=$(echo '{"last_assistant_message": "<promise>DIFF_DONE</promise>"}' | "$ROOT/scripts/stop-hook.sh" 2>&1)
-  grep -q '"decision": "block"' <<< "$out"
-  if grep -q "Ralph loop: Verified" <<< "$out"; then
+  out=$(echo '{"last_assistant_message": "<promise>DIFF_DONE</promise>"}' | "$ROOT/scripts/stop-hook.sh" 2>err)
+  jq -e '.decision == "block"' <<< "$out" >/dev/null
+  if grep -q "Ralph loop: Verified" err; then
     return 1
   fi
 }
@@ -649,16 +638,152 @@ test_state_values_keep_trailing_equals() {
   test ! -d .ralph
 }
 
-test_cli_missing_jq_fails_fast() {
-  "$ROOT/scripts/setup-ralph-loop.sh" "CLI jq task" >/dev/null
-  local bin="$PWD/bin" out status=0
-  mkdir "$bin"
-  ln -s "$(command -v git)" "$bin/git"
-  ln -s "$(command -v cat)" "$bin/cat"
-  out=$(PATH="$bin" "$(command -v bash)" "$ROOT/scripts/ralph-cli.sh" .ralph/fix_plan.md 2>&1) || status=$?
-  test "$status" -ne 0
-  grep -qF "Error: Ralph loop requires jq." <<< "$out"
-  test ! -f .ralph/cli.pid
+# Runs "$@" with a PATH holding only symlinks to the tools the scripts need, so jq is provably not found
+without_jq() {
+  local bin="$PWD/nojq-bin" t
+  if [[ ! -d "$bin" ]]; then
+    mkdir "$bin"
+    for t in awk bash cat cut date dirname env git grep head ls mkdir mktemp mv perl rm sed sleep sort tail tr wc yes timeout gtimeout uname; do
+      command -v "$t" >/dev/null && ln -s "$(command -v "$t")" "$bin/$t"
+    done
+  fi
+  ! PATH="$bin" command -v jq >/dev/null
+  PATH="$bin" "$@"
+}
+
+test_hook_and_cli_run_without_jq() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "No jq task" --max-iterations 3 --completion-promise NOJQ_DONE >/dev/null
+  local out
+  out=$(echo '{"last_assistant_message": "working"}' | without_jq "$ROOT/scripts/stop-hook.sh")
+  jq -e '.decision == "block" and .systemMessage == "Ralph loop iteration 2 of 3"' <<< "$out" >/dev/null
+  out=$(echo '{"last_assistant_message": "x"}' | without_jq "$ROOT/scripts/stop-hook.sh" cursor)
+  jq -e 'has("followup_message")' <<< "$out" >/dev/null
+  printf '#!/usr/bin/env bash\necho "<promise>NOJQ_DONE</promise>"\n' > agent.sh
+  chmod +x agent.sh
+  "$ROOT/scripts/setup-ralph-loop.sh" "No jq cli task" --max-iterations 3 --completion-promise NOJQ_DONE --force >/dev/null
+  perl -pi -e 's/- \[ \]/- [x]/g' .ralph/fix_plan.md
+  out=$(AGENT_BIN="$PWD/agent.sh" without_jq "$ROOT/scripts/ralph-cli.sh" 2>&1)
+  grep -qF "Ralph loop finished successfully." <<< "$out"
+  test ! -d .ralph
+}
+
+test_json_str_escapes_exactly() {
+  source "$ROOT/scripts/lib/json.sh"
+  local cases=(
+    'plain'
+    'say "hi" and \back\slash\ \\ \n literal'
+    $'tab\there\nnewline\r\n crlf'
+    $'ctl \001 \037 \b \f \033[31m'
+    'unicode: é 日本 😀'
+    ''
+  )
+  local c out
+  for c in "${cases[@]}"; do
+    out="$(printf '%s' "$c" | json_str)"
+    jq -e --arg c "$c" '. == $c' <<< "$out" >/dev/null
+  done
+  for c in $'a\n' 'a' $'a\n\n' $'\n'; do
+    printf '%s' "$c" | json_str > got.json
+    printf '%s' "$c" > want.txt
+    jq -j . got.json | cmp - want.txt
+  done
+  head -c 900000 /dev/urandom | base64 | head -c 1200000 | tr 'AB' '"\\' > big.txt
+  json_str < big.txt > got.json
+  jq -j . got.json | cmp - big.txt
+  awk 'BEGIN { for (i = 0; i < 1200000; i++) print "" }' > blank.txt # 1.2 M empty lines took 6.5 s without the awk fast path
+  SECONDS=0
+  json_str < blank.txt > got.json
+  test "$SECONDS" -lt 4
+  jq -j . got.json | cmp - blank.txt
+  tr 'C' '\n' < big.txt | json_str > got.json
+  jq -j . got.json | tr 'C' '\n' | cmp - <(tr 'C' '\n' < big.txt)
+}
+
+test_json_raw_ignores_escaped_decoys() {
+  source "$ROOT/scripts/lib/json.sh"
+  local p='{"last_assistant_message":"say \"session_id\":\"evil\" \"cwd\":\"/evil\" ok","session_id":"real","cwd":"/real","workspace_roots": [ "/w0","/w1"],"num":5,"nul":null,"o":{"k":1}}'
+  test "$(json_raw session_id <<< "$p")" = real
+  test "$(json_raw cwd <<< "$p")" = /real
+  test "$(json_raw workspace_roots <<< "$p")" = /w0
+  test "$(json_raw last_assistant_message <<< "$p")" = 'say \"session_id\":\"evil\" \"cwd\":\"/evil\" ok'
+  local key
+  for key in missing num nul o; do
+    test -z "$(json_raw "$key" <<< "$p")"
+  done
+  # decoy only inside an escaped string: no real key exists
+  test -z "$(json_raw session_id <<< '{"m":"x \"session_id\":\"evil\" y"}')"
+  head -c 900000 /dev/urandom | base64 | head -c 1200000 | tr 'AB' '"\\' | tr -d '\n' > big.txt
+  jq -c -n --rawfile m big.txt '{last_assistant_message:$m,session_id:"s"}' > big.json
+  test "$(json_raw session_id < big.json)" = s
+  test "$(json_raw last_assistant_message < big.json | wc -c)" -gt 1200000
+}
+
+test_hook_reads_pretty_payload_and_project_dir() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Pretty task" --max-iterations 9 >/dev/null
+  local out here="$PWD"
+  cd /
+  out=$(printf '{\n  "session_id": "s1",\n  "workspace_roots": [\n    "%s"\n  ],\n  "last_assistant_message": "w"\n}\n' "$here" | "$ROOT/scripts/stop-hook.sh")
+  jq -e '.decision == "block"' <<< "$out" >/dev/null
+  grep -q '^SESSION_ID=s1$' "$here/.ralph/state.env"
+  # payload cwd wins over CLAUDE_PROJECT_DIR; CLAUDE_PROJECT_DIR is the fallback
+  out=$(echo "{\"cwd\": \"$here\"}" | CLAUDE_PROJECT_DIR=/nonexistent "$ROOT/scripts/stop-hook.sh")
+  jq -e '.decision == "block"' <<< "$out" >/dev/null
+  out=$(echo '{"last_assistant_message": "w"}' | CLAUDE_PROJECT_DIR="$here" "$ROOT/scripts/stop-hook.sh")
+  jq -e '.decision == "block"' <<< "$out" >/dev/null
+  grep -q '^ITERATION=4$' "$here/.ralph/state.env"
+  # an escaped decoy session_id in the message must not rebind or mismatch the loop
+  out=$(echo '{"session_id":"s1","last_assistant_message":"\"session_id\":\"other\""}' | CLAUDE_PROJECT_DIR="$here" "$ROOT/scripts/stop-hook.sh")
+  jq -e '.decision == "block"' <<< "$out" >/dev/null
+}
+
+test_escaped_promise_forms_match() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Escaped promise task" --max-iterations 9 --completion-promise 'ESC DONE/1' >/dev/null
+  perl -pi -e 's/- \[ \]/- [x]/g' .ralph/fix_plan.md
+  cp -R .ralph saved
+  local msg out
+  for msg in 'done <promise>ESC DONE/1</promise>' 'done <promise>ESC DONE\/1<\/promise>' 'x <promise>\n ESC DONE/1\t</promise>' \
+    'a <promise>ESC DONE/1</promise>' 'a <promise>ESC DONE\/1<\/promise>' \
+    '\u003cpromise\u003eESC DONE/1\u003c/promise\u003e' '\u003Cpromise\u003EESC DONE\/1\u003C\/promise\u003E'; do
+    rm -rf .ralph; cp -R saved .ralph
+    out=$(printf '{"last_assistant_message":"%s"}\n' "$msg" | "$ROOT/scripts/stop-hook.sh" 2>/dev/null)
+    jq -e '.systemMessage | contains("Verified")' <<< "$out" >/dev/null
+    test ! -d .ralph
+  done
+  for msg in '<promise>ESC DONE/1X</promise>' '<promise>ESC DONE</promise>' '<promise>esc done/1</promise>' '<promise>ESC DONE/1 X</promise>'; do
+    rm -rf .ralph; cp -R saved .ralph
+    out=$(printf '{"last_assistant_message":"%s"}\n' "$msg" | "$ROOT/scripts/stop-hook.sh" 2>/dev/null)
+    jq -e '.decision == "block"' <<< "$out" >/dev/null
+    test -d .ralph
+  done
+  # a promise in an earlier field does not count
+  rm -rf .ralph; cp -R saved .ralph
+  out=$(echo '{"t":"<promise>ESC DONE/1</promise>","last_assistant_message":"no"}' | "$ROOT/scripts/stop-hook.sh")
+  jq -e '.decision == "block"' <<< "$out" >/dev/null
+}
+
+test_invalid_utf8_does_not_break_promise() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Latin1 task" --max-iterations 3 --completion-promise LATIN_DONE >/dev/null
+  perl -pi -e 's/- \[ \]/- [x]/g' .ralph/fix_plan.md
+  local out
+  out=$(printf '{"session_id":"s","cwd":"%s","last_assistant_message":"caf\351 <promise>LATIN_DONE</promise>"}' "$PWD" | LC_ALL=en_US.UTF-8 "$ROOT/scripts/stop-hook.sh" 2>/dev/null)
+  jq -e '.systemMessage | contains("Verified")' <<< "$out" >/dev/null
+  test ! -d .ralph
+  "$ROOT/scripts/setup-ralph-loop.sh" "Latin1 cli task" --max-iterations 3 --completion-promise LATIN_DONE >/dev/null
+  perl -pi -e 's/- \[ \]/- [x]/g' .ralph/fix_plan.md
+  printf '#!/usr/bin/env bash\nprintf "caf\\351 <promise>LATIN_DONE</promise>\\n"\n' > agent.sh
+  chmod +x agent.sh
+  out=$(LC_ALL=en_US.UTF-8 AGENT_BIN="$PWD/agent.sh" "$ROOT/scripts/ralph-cli.sh" 2>&1)
+  grep -qF "Ralph loop finished successfully." <<< "$out"
+}
+
+test_hook_output_is_valid_json_for_tricky_feedback() {
+  local msg=$'q"uote back\\slash tab\t ctl\001\037\033 uni é日本😀 end\\'
+  "$ROOT/scripts/setup-ralph-loop.sh" "Tricky task" --max-iterations 5 --test-cmd "printf '%s' \"\$TRICKY\"; exit 1" >/dev/null
+  local out
+  out=$(echo '{"last_assistant_message": "w"}' | TRICKY="$msg" "$ROOT/scripts/stop-hook.sh")
+  jq -e --arg m "$msg" '.decision == "block" and (.reason | contains($m)) and .systemMessage == "Ralph loop iteration 2 of 5"' <<< "$out" >/dev/null
+  out=$(echo '{"last_assistant_message": "w"}' | TRICKY="$msg" "$ROOT/scripts/stop-hook.sh" cursor)
+  jq -e --arg m "$msg" '.followup_message | contains($m)' <<< "$out" >/dev/null
 }
 
 test_install_client_detects_non_symlink() {
@@ -673,7 +798,7 @@ test_install_client_detects_non_symlink() {
 
 test_unmatchable_promise_is_rejected() {
   local promise
-  for promise in 'A<B' 'A\B' ' LEAD' 'TRAIL '; do
+  for promise in 'A<B' 'A\B' ' LEAD' 'TRAIL ' 'A"B' 'A&B' $'A\tB' $'A\001B'; do
     if "$ROOT/scripts/setup-ralph-loop.sh" "Promise task" --completion-promise "$promise" 2>/dev/null; then
       return 1
     fi
@@ -686,7 +811,7 @@ test_success_requires_passing_tests() {
   perl -pi -e 's/- \[ \]/- [x]/g' .ralph/fix_plan.md
   local out
   out=$(echo '{"last_assistant_message": "<promise>GATE_FAIL</promise>"}' | "$ROOT/scripts/stop-hook.sh")
-  grep -q '"decision": "block"' <<< "$out"
+  jq -e '.decision == "block"' <<< "$out" >/dev/null
   test -d .ralph
   "$ROOT/scripts/cancel-ralph.sh"
 }
@@ -708,7 +833,7 @@ test_base_commit_option_is_not_passed_to_git() {
   local out
   out=$(echo '{"last_assistant_message": "<promise>BASE_DONE</promise>"}' | "$ROOT/scripts/stop-hook.sh")
   test ! -e FILE
-  grep -q '"decision": "block"' <<< "$out"
+  jq -e '.decision == "block"' <<< "$out" >/dev/null
   test -d .ralph
 }
 
@@ -814,7 +939,6 @@ run_test "Agent-Written cli.pid Does Not Gate Hook" test_agent_written_cli_pid_d
 run_test "Missing Plan File Raises Integrity Alert" test_missing_plan_alert
 run_test "State Dir Excluded From git add -A" test_state_dir_is_excluded_from_git
 run_test "Stop Hook Silent Outside Git Or Bad cwd" test_hook_is_silent_outside_git
-run_test "Missing jq Fails Before Advancing" test_missing_jq_fails_before_advancing
 run_test "Committed Test Deletion Is Caught" test_committed_test_deletion_is_caught
 run_test "Test Directory Variants Are Guarded" test_test_directory_variants_are_guarded
 run_test "Bare State Line Without '=' Is Ignored" test_bare_state_line_is_ignored
@@ -823,7 +947,13 @@ run_test "Exclude Append Handles Missing Trailing Newline" test_exclude_append_h
 run_test "Baseline Diff Failure Blocks Verification" test_diff_failure_blocks_verification
 run_test "Cancel Refuses Tracked .ralph State" test_cancel_refuses_tracked_state
 run_test "State Values Keep Trailing '=' (Bash 3.2 IFS Fix)" test_state_values_keep_trailing_equals
-run_test "Headless CLI Missing jq Fails Fast" test_cli_missing_jq_fails_fast
+run_test "Hook And CLI Run With jq Absent From PATH" test_hook_and_cli_run_without_jq
+run_test "json_str Escapes Exactly (Incl. 1.2 MB)" test_json_str_escapes_exactly
+run_test "json_raw Ignores Escaped Decoys (Incl. 1.2 MB)" test_json_raw_ignores_escaped_decoys
+run_test "Hook Reads Pretty Payload And Project Dir Order" test_hook_reads_pretty_payload_and_project_dir
+run_test "JSON-Escaped Promise Forms Match Exactly" test_escaped_promise_forms_match
+run_test "Invalid UTF-8 Does Not Break Promise (UTF-8 Locale)" test_invalid_utf8_does_not_break_promise
+run_test "Hook Output Is Valid JSON For Tricky Feedback" test_hook_output_is_valid_json_for_tricky_feedback
 run_test "install-client Detects Non-Symlink Target" test_install_client_detects_non_symlink
 run_test "Unmatchable Completion Promise Is Rejected" test_unmatchable_promise_is_rejected
 run_test "Success Gate Requires Passing Tests" test_success_requires_passing_tests
