@@ -2,8 +2,10 @@
 set -euo pipefail
 umask 077
 
+# $1 names the host whose output contract applies; Cursor is the only one that reads followup_message
+HOST="${1:-}"
 RAW_INPUT="$(cat || true)"
-HOOK_DIR="$(printf '%s' "$RAW_INPUT" | jq -r '.cwd // .workspacePaths[0] // empty' 2>/dev/null || true)"
+HOOK_DIR="$(printf '%s' "$RAW_INPUT" | jq -r '.cwd // .workspace_roots[0] // empty' 2>/dev/null || true)"
 cd "${HOOK_DIR:-.}" 2>/dev/null || exit 0
 
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
@@ -30,8 +32,8 @@ if [[ -n "$(git ls-files ':(icase).ralph')" ]]; then
 fi
 
 # The headless CLI advances the loop itself; the plugin hook must not run during its agent calls.
-CLI_PID="$(cat "$STATE_DIR/cli.pid" 2>/dev/null || true)"
-if [[ -z "${RALPH_CLI:-}" && -n "$CLI_PID" ]] && kill -0 "$CLI_PID" 2>/dev/null; then
+# Gated by the environment, not cli.pid: the agent can write files, so it could write its own PID there.
+if [[ -n "${RALPH_CLI_AGENT:-}" ]]; then
   exit 0
 fi
 
@@ -64,8 +66,12 @@ TEST_COMMAND=""
 BASE_COMMIT=""
 INITIAL_TASK_COUNT=1
 STARTED_AT=""
+SESSION_ID=""
 
-while IFS="=" read -r key val || [[ -n "$key" ]]; do
+while IFS= read -r line || [[ -n "$line" ]]; do
+  [[ "$line" == *=* ]] || continue
+  key="${line%%=*}"
+  val="${line#*=}"
   case "$key" in
     ITERATION) [[ "$val" =~ ^[0-9]+$ ]] && ITERATION="$val" ;;
     MAX_ITERATIONS) [[ "$val" =~ ^[0-9]+$ ]] && MAX_ITERATIONS="$val" ;;
@@ -74,11 +80,31 @@ while IFS="=" read -r key val || [[ -n "$key" ]]; do
     BASE_COMMIT) BASE_COMMIT="$val" ;;
     INITIAL_TASK_COUNT) [[ "$val" =~ ^[0-9]+$ ]] && INITIAL_TASK_COUNT="$val" ;;
     STARTED_AT) STARTED_AT="$val" ;;
+    SESSION_ID) SESSION_ID="$val" ;;
   esac
 done < "$STATE_FILE"
 
-IS_ANTIGRAVITY="$(printf '%s' "$RAW_INPUT" | jq -r 'has("executionNum")' 2>/dev/null || true)"
 LAST_MSG="$(printf '%s' "$RAW_INPUT" | jq -r '.last_assistant_message // empty' 2>/dev/null || true)"
+
+# The loop belongs to the first session that stops in it. Payloads without session_id (headless CLI, other hosts) are not bound.
+PAYLOAD_SESSION_ID="$(printf '%s' "$RAW_INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)"
+if [[ -n "$PAYLOAD_SESSION_ID" ]]; then
+  if [[ -z "$SESSION_ID" ]]; then
+    SESSION_ID="$PAYLOAD_SESSION_ID"
+  elif [[ "$PAYLOAD_SESSION_ID" != "$SESSION_ID" ]]; then
+    echo "Ralph loop: bound to session $SESSION_ID, ignoring this session. Run setup-ralph-loop.sh --force to rebind, or cancel-ralph.sh to end the loop." >&2
+    exit 0
+  fi
+fi
+
+# Cursor reports how the run ended; an aborted run neither verifies nor advances the loop
+if [[ "$HOST" == cursor ]]; then
+  RUN_STATUS="$(printf '%s' "$RAW_INPUT" | jq -r '.status // empty' 2>/dev/null || true)"
+  if [[ -n "$RUN_STATUS" && "$RUN_STATUS" != completed ]]; then
+    echo '{}'
+    exit 0
+  fi
+fi
 
 has_exact_promise() {
   local text="$1"
@@ -117,12 +143,19 @@ has_unchecked_items() {
 TEST_FEEDBACK=""
 TEST_STATUS=0
 
+# Final stdout when the loop ends: Cursor reads only followup_message, so it gets {}; other hosts show the notice to the user
+end_output() {
+  if [[ "$HOST" == cursor ]]; then echo '{}'; else jq -n --arg m "$MSG" '{systemMessage:$m}'; fi
+}
+
+# shortcut: state.env is writable by the agent, so TEST_COMMAND runs with whatever the agent wrote there. Full fix needs state outside the agent's writable scope (e.g. a sandbox deny rule on .ralph/state.env).
 if [[ -n "$TEST_COMMAND" ]]; then
   TIMEOUT_CMD="$(command -v timeout || command -v gtimeout || true)"
   set +e
   TEST_OUTPUT=$(${TIMEOUT_CMD:+"$TIMEOUT_CMD" 120} bash -c "$TEST_COMMAND" 2>&1)
   TEST_STATUS=$?
   set -e
+  if [[ ${#TEST_OUTPUT} -gt 30000 ]]; then TEST_OUTPUT=${TEST_OUTPUT: -30000}; fi # keep the tail; failures print last
 
   if [[ "$TEST_STATUS" -ne 0 ]]; then
     TEST_FEEDBACK=$'\n\n'"[Automated Verification Failed for '$TEST_COMMAND']:"$'\n'"$TEST_OUTPUT"
@@ -132,7 +165,8 @@ if [[ -n "$TEST_COMMAND" ]]; then
 fi
 
 TEST_PATH_RE='(^|/)(tests?|__tests__|specs?)/|(^|/)test_[^/]*\.py$|[._](test|spec)\.|(Test|Tests)\.(java|kt|cs)$'
-if ! DELETED_FILES="$(git -c core.quotePath=false diff --no-renames --name-only --diff-filter=D "$BASE_COMMIT")"; then
+# BASE_COMMIT is agent-writable state: a value like --output=FILE must never reach git as an option
+if [[ ! "$BASE_COMMIT" =~ ^[0-9a-f]{7,64}$ ]] || ! DELETED_FILES="$(git -c core.quotePath=false diff --no-renames --name-only --diff-filter=D "$BASE_COMMIT" --)"; then
   DELETED_TESTS="unknown (git diff against $BASE_COMMIT failed)"
 else
   DELETED_TESTS="$(grep -E "$TEST_PATH_RE" <<< "$DELETED_FILES" || true)"
@@ -160,13 +194,10 @@ fi
 
 if [ "$PROMISE_MATCHED" = true ] && [ "$TEST_STATUS" -eq 0 ] && [[ -z "$DELETED_TESTS" ]] && [[ "$TOTAL_TASKS" -ge "$INITIAL_TASK_COUNT" ]]; then
   if ! has_unchecked_items "$PLAN_FILE"; then
-    echo "Ralph loop: Verified with test command '$TEST_COMMAND' and all plan items complete!" >&2
+    MSG="Ralph loop: Verified${TEST_COMMAND:+ with test command '$TEST_COMMAND'} and all plan items complete!"
+    echo "$MSG" >&2
     rm -rf "$STATE_DIR"
-    if [ "$IS_ANTIGRAVITY" = true ]; then
-      echo '{"decision": "stop"}'
-    else
-      echo '{"decision": "allow"}'
-    fi
+    end_output
     exit 0
   else
     TEST_FEEDBACK+=$'\n\n'"[Notice: Verification passed, but unchecked work items remain in fix_plan.md. Complete all tasks before exiting.]"
@@ -174,28 +205,14 @@ if [ "$PROMISE_MATCHED" = true ] && [ "$TEST_STATUS" -eq 0 ] && [[ -z "$DELETED_
 fi
 
 if [[ "$MAX_ITERATIONS" -gt 0 && "$ITERATION" -ge "$MAX_ITERATIONS" ]]; then
-  echo "Ralph loop: Max iterations ($MAX_ITERATIONS) reached without satisfying completion criteria." >&2
+  MSG="Ralph loop: Max iterations ($MAX_ITERATIONS) reached without satisfying completion criteria."
+  echo "$MSG" >&2
   rm -rf "$STATE_DIR"
-  if [ "$IS_ANTIGRAVITY" = true ]; then
-    echo '{"decision": "stop"}'
-  else
-    echo '{"decision": "allow"}'
-  fi
+  end_output
   exit 0
 fi
 
 NEXT_ITER=$((ITERATION + 1))
-
-cat > "$STATE_FILE.tmp" <<EOF
-ITERATION=$NEXT_ITER
-MAX_ITERATIONS=$MAX_ITERATIONS
-COMPLETION_PROMISE=$COMPLETION_PROMISE
-TEST_COMMAND=$TEST_COMMAND
-BASE_COMMIT=$BASE_COMMIT
-INITIAL_TASK_COUNT=$INITIAL_TASK_COUNT
-STARTED_AT=$STARTED_AT
-EOF
-mv "$STATE_FILE.tmp" "$STATE_FILE"
 
 GIT_PARTS=""
 GIT_STATUS="$(git status --short 2>/dev/null || true)"
@@ -224,15 +241,30 @@ fi
 
 FEEDBACK="${PLAN_BODY}${GIT_CTX}${TEST_FEEDBACK}"
 
-if [ "$IS_ANTIGRAVITY" = true ]; then
-  jq -n --arg reason "$FEEDBACK" '{decision: "continue", reason: $reason}'
+if [[ "$MAX_ITERATIONS" -gt 0 ]]; then
+  SYS_MSG="Ralph loop iteration $NEXT_ITER of $MAX_ITERATIONS"
 else
-  if [[ "$MAX_ITERATIONS" -gt 0 ]]; then
-    SYS_MSG="Ralph loop iteration $NEXT_ITER of $MAX_ITERATIONS"
-  else
-    SYS_MSG="Ralph loop iteration $NEXT_ITER"
-  fi
-
-  jq -n --arg reason "$FEEDBACK" --arg msg "$SYS_MSG" \
-    '{decision: "block", reason: $reason, followup_message: $reason, systemMessage: $msg}'
+  SYS_MSG="Ralph loop iteration $NEXT_ITER"
 fi
+
+# Feedback goes through stdin: a --arg value is capped by the OS (~128 KiB per argument on Linux)
+if [[ "$HOST" == cursor ]]; then
+  RESULT="$(printf '%s' "$FEEDBACK" | jq -Rs '{followup_message: .}')"
+else
+  RESULT="$(printf '%s' "$FEEDBACK" | jq -Rs --arg msg "$SYS_MSG" '{decision: "block", reason: ., systemMessage: $msg}')"
+fi
+
+# Advance only after the output is built, so a failed build cannot leave the loop advanced with no feedback
+cat > "$STATE_FILE.tmp" <<EOF
+ITERATION=$NEXT_ITER
+MAX_ITERATIONS=$MAX_ITERATIONS
+COMPLETION_PROMISE=$COMPLETION_PROMISE
+TEST_COMMAND=$TEST_COMMAND
+BASE_COMMIT=$BASE_COMMIT
+INITIAL_TASK_COUNT=$INITIAL_TASK_COUNT
+STARTED_AT=$STARTED_AT
+SESSION_ID=$SESSION_ID
+EOF
+mv "$STATE_FILE.tmp" "$STATE_FILE"
+
+printf '%s\n' "$RESULT"

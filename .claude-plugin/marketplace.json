@@ -1,7 +1,7 @@
 {
   "name": "ralph-wiggum",
-  "interface": {
-    "displayName": "Ralph Wiggum"
+  "owner": {
+    "name": "Burak Kaygusuz"
   },
   "plugins": [
     {

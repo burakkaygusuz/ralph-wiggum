@@ -28,5 +28,15 @@ jobs:
           ' plugin.json >/dev/null
           echo "plugin.json conforms 100% to Agent Plugins 1.0.0 closed schema"
 
+  test:
+    name: Run Test Suite (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
       - name: Run Test Suite
         run: ./tests/run-tests.sh

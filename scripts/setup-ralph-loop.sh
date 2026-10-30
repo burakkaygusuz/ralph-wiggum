@@ -46,6 +46,7 @@ if [[ ! "$MAX_ITERATIONS" =~ ^[0-9]+$ ]]; then
   echo "Error: --max-iterations must be a non-negative integer" >&2
   exit 1
 fi
+MAX_ITERATIONS=$((10#$MAX_ITERATIONS)) # base 10: a leading zero would otherwise be read as octal
 
 if [[ -z "$PROMPT" ]]; then
   echo "Error: Prompt cannot be empty" >&2
@@ -54,6 +55,12 @@ fi
 
 if [[ "$COMPLETION_PROMISE$TEST_CMD" == *$'\n'* ]]; then
   echo "Error: --completion-promise and --test-cmd must be single-line" >&2
+  exit 1
+fi
+
+# The stop hook trims whitespace inside <promise> tags and never unescapes, so these promises could never match
+if [[ "$COMPLETION_PROMISE" == *[\<\\]* ]] || [[ "$COMPLETION_PROMISE" =~ ^[[:space:]]|[[:space:]]$ ]]; then
+  echo "Error: --completion-promise cannot contain '<' or '\\', and cannot start or end with whitespace" >&2
   exit 1
 fi
 
@@ -69,7 +76,6 @@ fi
 
 BASE_COMMIT="$(git -C "$PROJECT_ROOT" rev-parse --verify -q HEAD)" || { echo "Error: Ralph loop needs a commit as its baseline for the test integrity guard." >&2; exit 1; }
 
-rm -f "$STATE_DIR/cli.pid"
 mkdir -p "$STATE_DIR"
 
 cat <<EOF > "$PLAN_FILE"
@@ -79,6 +85,8 @@ cat <<EOF > "$PLAN_FILE"
 
 ## 1. Specification & Objective
 $PROMPT
+
+> **Completion:** Output \`<promise>${COMPLETION_PROMISE:-COMPLETE}</promise>\` in your final reply only when every work item is checked and verified.
 
 ## 2. Working Memory & Cross-Turn Learnings
 - [Initial State]: Repository baseline under inspection.
@@ -93,7 +101,7 @@ $PROMPT
 <!-- Record verified test output traces, diff confirmations, and completed deliverables here -->
 EOF
 
-INITIAL_TASK_COUNT=$(grep -Ec "^[[:space:]]*- \[([ xX])\]" "$PLAN_FILE" || echo "3")
+INITIAL_TASK_COUNT=$(grep -Ec "^[[:space:]]*- \[([ xX])\]" "$PLAN_FILE")
 
 cat > "$STATE_FILE.tmp" <<EOF
 ITERATION=1
@@ -106,4 +114,4 @@ STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
 mv "$STATE_FILE.tmp" "$STATE_FILE"
 
-echo "Ralph loop initialized (Iteration 1, Max: ${MAX_ITERATIONS:-unlimited}, Promise: ${COMPLETION_PROMISE:-none})"
+echo "Ralph loop initialized (Iteration 1, Max: $([[ "$MAX_ITERATIONS" -gt 0 ]] && echo "$MAX_ITERATIONS" || echo unlimited), Promise: ${COMPLETION_PROMISE:-none})"

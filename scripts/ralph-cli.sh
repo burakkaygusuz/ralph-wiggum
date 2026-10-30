@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+command -v jq >/dev/null || { echo "Error: Ralph loop requires jq." >&2; exit 1; }
+
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 STATE_DIR="$PROJECT_ROOT/.ralph"
 STATE_FILE="$STATE_DIR/state.env"
@@ -37,7 +39,10 @@ read_state() {
   COMPLETION_PROMISE=""
   TEST_COMMAND=""
   STARTED_AT=""
-  while IFS="=" read -r key val || [[ -n "$key" ]]; do
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" == *=* ]] || continue
+    key="${line%%=*}"
+    val="${line#*=}"
     case "$key" in
       ITERATION) [[ "$val" =~ ^[0-9]+$ ]] && ITERATION="$val" ;;
       MAX_ITERATIONS) [[ "$val" =~ ^[0-9]+$ ]] && MAX_ITERATIONS="$val" ;;
@@ -49,7 +54,7 @@ read_state() {
 }
 
 read_state
-echo "Starting Ralph Loop on '$PLAN_FILE' with '$AGENT_BIN' (Max: $MAX_ITERATIONS)..."
+echo "Starting Ralph Loop on '$PLAN_FILE' with '$AGENT_BIN' (Max: $([[ "$MAX_ITERATIONS" -gt 0 ]] && echo "$MAX_ITERATIONS" || echo unlimited))..."
 
 CURRENT_PROMPT="$(cat "$PLAN_FILE")"
 EXIT_CODE=0
@@ -59,8 +64,9 @@ while :; do
   ITER="$ITERATION"
   [[ "$MAX_ITERATIONS" -gt 0 && "$ITER" -gt "$MAX_ITERATIONS" ]] && { echo "Max iterations ($MAX_ITERATIONS) reached."; EXIT_CODE=1; break; }
 
-  echo "=== [Iteration $ITER${MAX_ITERATIONS:+ of $MAX_ITERATIONS}] ==="
-  OUTPUT=$("$AGENT_BIN" --print -p "$CURRENT_PROMPT" </dev/null) || {
+  [[ "$MAX_ITERATIONS" -gt 0 ]] && LIMIT=" of $MAX_ITERATIONS" || LIMIT=""
+  echo "=== [Iteration $ITER$LIMIT] ==="
+  OUTPUT=$(RALPH_CLI_AGENT=1 "$AGENT_BIN" --print -p "$CURRENT_PROMPT" </dev/null) || {
     echo "Agent process exited on iteration $ITER."
     EXIT_CODE=1
     break
@@ -68,7 +74,7 @@ while :; do
   echo "$OUTPUT"
 
   HOOK_ERR_FILE="$(mktemp)"
-  HOOK_RESULT=$(jq -n --arg m "$OUTPUT" '{last_assistant_message: $m}' | RALPH_CLI=1 "$STOP_HOOK" 2>"$HOOK_ERR_FILE" || true)
+  HOOK_RESULT=$(printf '%s' "$OUTPUT" | jq -Rs '{last_assistant_message: .}' | RALPH_CLI_AGENT= "$STOP_HOOK" 2>"$HOOK_ERR_FILE" || true)
   HOOK_ERR="$(cat "$HOOK_ERR_FILE")"
   rm -f "$HOOK_ERR_FILE"
   [[ -n "$HOOK_ERR" ]] && echo "$HOOK_ERR" >&2

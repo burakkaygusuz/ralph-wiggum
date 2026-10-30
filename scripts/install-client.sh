@@ -16,6 +16,10 @@ link_skills() {
       mv "$target_path" "$target_path.bak"
     fi
     ln -sfn "$REPO_ROOT/skills/$s" "$target_path"
+    if [[ ! -L "$target_path" ]]; then
+      echo "Error: $target_path is not a symlink after linking." >&2
+      exit 1
+    fi
   done
   echo "Linked skills to $dir"
 }

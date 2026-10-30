@@ -12,7 +12,7 @@ Ralph Wiggum is an autonomous development loop plugin for AI coding assistants, 
 - **No More Half-Done Code:** Strictly terminates only when your success promise (`<promise>COMPLETE</promise>`) is genuinely verified and all work items are complete.
 - **Test Integrity Guard:** Deterministically verifies that existing test files are not deleted to bypass test backpressure.
 - **Git-Clean State:** Setup writes `.ralph/` to `.git/info/exclude` and does not touch `.gitignore`.
-- **Works Across All Agents:** Compatible with **Claude Code**, **Cursor**, **OpenAI Codex**, **Google Antigravity**, and **GitHub Copilot**. The `<promise>` is read only from the agent's final reply; this is verified on Claude Code and Codex. Antigravity's Stop payload carries no final reply, so its loop ends only at max iterations; Cursor and Copilot are unverified. Antigravity reads its hook from the root `hooks.json`.
+- **Works Across All Agents:** Compatible with **Claude Code**, **Cursor**, **OpenAI Codex**, **Google Antigravity**, and **GitHub Copilot**. The `<promise>` is read only from the agent's final reply; this is verified on Claude Code only. Codex and Cursor use schema-compatible output but are unverified, and Antigravity and Copilot are unverified. This repo ships no Antigravity hook config, so the loop does not auto-continue there; use `ralph-cli.sh` for unattended runs.
 - **Safety First:** Safe default iteration cap (`--max-iterations 10`), continuous per-turn test verification (`--test-cmd`), and instant cancellation (`/cancel-ralph` or `Ctrl+C`).
 
 ---
@@ -21,11 +21,11 @@ Ralph Wiggum is an autonomous development loop plugin for AI coding assistants, 
 
 | Environment | Supported | Requirements / Notes |
 | :--- | :---: | :--- |
-| **Linux** | **Yes** | Bash 4.0+, `jq`, and core tools (`git`, `awk`, `sed`, `grep`, `date`). |
-| **macOS** | **Yes** | Native Terminal / zsh / bash with `jq` and standard CLI utilities. `--test-cmd` is time-limited only when `timeout` or `gtimeout` is installed (`brew install coreutils`). |
-| **Windows (Git Bash)** | **Yes** | Git Bash (bundled with Git for Windows) plus `jq`. |
-| **Windows (WSL)** | **Yes** | WSL (Ubuntu, Debian, or any Linux distro). |
-| **Windows (CMD / PowerShell)** | _Via Git Bash / WSL_ | Requires Git Bash or WSL terminal environment. |
+| **Linux** | **Yes** | Bash (no bash-4 features used), `jq`, and core tools (`git`, `awk`, `sed`, `grep`, `date`). |
+| **macOS** | **Yes** | Bash 3.2 (`/bin/bash`) works. `jq` is preinstalled on macOS 15+ (_unverified_); on earlier versions run `brew install jq`. `--test-cmd` is time-limited only when `timeout` or `gtimeout` is installed (`brew install coreutils`). |
+| **Windows (Git Bash)** | _Unverified_ | Git for Windows is required for the hooks. `jq` is not bundled with Git for Windows; install it separately. |
+| **Windows (WSL)** | _Unverified_ | Keep the repo in the Linux filesystem (for example `~/`), not under `/mnt/c`. Install `jq` inside the distro. |
+| **Windows (PowerShell only)** | **No** | Not supported. Use Git Bash or WSL. |
 
 ---
 
@@ -85,8 +85,10 @@ Conformant clients discover `skills/` and `plugin.json` automatically:
 | :---------------------------- | :--------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `PROMPT`                      |  **Yes**   | The task description, constraints, and goal for the agent.                                                                                                                           |
 | `--max-iterations <N>`        | _Optional_ | Safety ceiling on turns (default: 10). Use `<plugin-dir>/scripts/ralph-cli.sh` for unattended runs; it exits non-zero when the ceiling is reached (0 = unlimited).                         |
-| `--completion-promise <TEXT>` | _Optional_ | Stops the loop early the moment the agent verifies and outputs `<promise>TEXT</promise>`.                                                                                            |
+| `--completion-promise <TEXT>` | _Optional_ | Stops the loop early the moment the agent verifies and outputs `<promise>TEXT</promise>`. Without it, `<promise>COMPLETE</promise>` or `<promise>DONE</promise>` is accepted. Setup rejects TEXT containing `<` or `\`, or with leading/trailing whitespace, because the stop hook could never match it. |
 | `--test-cmd <COMMAND>`        | _Optional_ | Hard backpressure: Executes test command (`exit code 0`) on every turn before promise is accepted.                                                                                   |
+| `--prompt-file <PATH>`        | _Optional_ | Read the task text from a file instead of arguments (use it for prompts with quotes or shell syntax). Relative paths resolve from the repository root. Cannot be combined with `PROMPT`. |
+| `--force`                     | _Optional_ | Replace an existing active loop's state. Without it, setup refuses while `.ralph/state.env` exists.                                                                                 |
 
 ---
 
@@ -154,6 +156,8 @@ For unbounded overnight tasks beyond chat host continuation limits:
 <plugin-dir>/scripts/ralph-cli.sh .ralph/fix_plan.md
 ```
 
+`ralph-cli.sh` runs `$AGENT_BIN --print -p <prompt>` each iteration. `AGENT_BIN` defaults to `claude`, so `--print -p` is Claude Code syntax; set `AGENT_BIN` to another binary only if it accepts the same flags. Do not run a plugin-enabled interactive session in the same repo while `ralph-cli.sh` runs.
+
 ---
 
 ### How to Cancel an Active Loop
@@ -170,6 +174,8 @@ For unbounded overnight tasks beyond chat host continuation limits:
 2. **Test Integrity Guard:** Blocks completion if existing test files are deleted to bypass test backpressure.
 3. **Clean Cancellation & Signal Trapping:** Handles `SIGINT` (`Ctrl+C`) and `SIGTERM` in CLI runner to clean up `.ralph` state instantly.
 4. **Safety Ceiling:** Built-in default `--max-iterations 10` to prevent unexpected token spend on impossible tasks.
+5. **Session Binding:** The loop binds to the first session that stops after setup. Stops from other sessions are ignored, with a stderr notice (logged by the hook; the host may not show it in the chat), until you re-run `setup-ralph-loop.sh --force` or cancel. A new session after `/clear` may be ignored the same way if the host issues a new session id (not verified).
+6. **Known Limit (Agent-Writable State):** `.ralph/state.env` is plain files the agent can edit, so `--test-cmd`, `BASE_COMMIT` and `INITIAL_TASK_COUNT` are only as trusted as the agent's file access. Deny writes to `.ralph/state.env` in your agent's permissions or sandbox to close this; the agent still needs to edit `.ralph/fix_plan.md`, and `/ralph-loop` writes `.ralph/prompt.md`.
 
 ---
 
