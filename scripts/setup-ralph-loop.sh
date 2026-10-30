@@ -1,48 +1,44 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
-PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+command -v jq >/dev/null || { echo "Error: Ralph loop requires jq." >&2; exit 1; }
+
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "Error: Ralph loop must run inside a git repository." >&2; exit 1; }
+cd "$PROJECT_ROOT"
+EXCLUDE_FILE="$(git rev-parse --git-path info/exclude)"
+mkdir -p "$(dirname "$EXCLUDE_FILE")"
+grep -qxF '.ralph/' "$EXCLUDE_FILE" 2>/dev/null || printf '\n.ralph/\n' >> "$EXCLUDE_FILE"
+
 STATE_DIR="$PROJECT_ROOT/.ralph"
 STATE_FILE="$STATE_DIR/state.env"
 PLAN_FILE="$STATE_DIR/fix_plan.md"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 MAX_ITERATIONS=10
 COMPLETION_PROMISE=""
 TEST_CMD=""
 PROMPT=""
 FORCE=false
+PROMPT_FILE=""
 
-if [ "$#" -eq 1 ] && [[ "$1" == *"--"* ]]; then
-  input="$1"
-  if [[ "$input" =~ --force ]]; then
-    FORCE=true
-    input="${input//--force/}"
-  fi
-  if [[ "$input" =~ --max-iterations[[:space:]]+([0-9]+) ]]; then
-    MAX_ITERATIONS="${BASH_REMATCH[1]}"
-    input="${input//${BASH_REMATCH[0]}/}"
-  fi
-  if [[ "$input" =~ --completion-promise[[:space:]]+(\"([^\"]+)\"|\x27([^\x27]+)\x27|([^[:space:]]+)) ]]; then
-    COMPLETION_PROMISE="${BASH_REMATCH[2]:-${BASH_REMATCH[3]:-${BASH_REMATCH[4]}}}"
-    input="${input//${BASH_REMATCH[0]}/}"
-  fi
-  if [[ "$input" =~ --test-cmd[[:space:]]+(\"([^\"]+)\"|\x27([^\x27]+)\x27|([^[:space:]]+)) ]]; then
-    TEST_CMD="${BASH_REMATCH[2]:-${BASH_REMATCH[3]:-${BASH_REMATCH[4]}}}"
-    input="${input//${BASH_REMATCH[0]}/}"
-  fi
-  PROMPT="${input#"${input%%[![:space:]]*}"}"
-  PROMPT="${PROMPT%"${PROMPT##*[![:space:]]}"}"
+prompt_parts=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --force) FORCE=true; shift ;;
+    --max-iterations) [[ $# -ge 2 ]] || { echo "Error: --max-iterations requires a value" >&2; exit 1; }; MAX_ITERATIONS="$2"; shift 2 ;;
+    --completion-promise) [[ $# -ge 2 ]] || { echo "Error: --completion-promise requires a value" >&2; exit 1; }; COMPLETION_PROMISE="$2"; shift 2 ;;
+    --test-cmd) [[ $# -ge 2 ]] || { echo "Error: --test-cmd requires a value" >&2; exit 1; }; TEST_CMD="$2"; shift 2 ;;
+    --prompt-file) [[ $# -ge 2 ]] || { echo "Error: --prompt-file requires a value" >&2; exit 1; }; PROMPT_FILE="$2"; shift 2 ;;
+    *) prompt_parts+=("$1"); shift ;;
+  esac
+done
+
+if [[ -n "$PROMPT_FILE" ]]; then
+  [[ ${#prompt_parts[@]} -eq 0 ]] || { echo "Error: pass the prompt either as arguments or with --prompt-file, not both" >&2; exit 1; }
+  [[ -f "$PROMPT_FILE" ]] || { echo "Error: prompt file $PROMPT_FILE not found" >&2; exit 1; }
+  PROMPT="$(cat "$PROMPT_FILE")"
 else
-  prompt_parts=()
-  while [ "$#" -gt 0 ]; do
-    case "$1" in
-      --force) FORCE=true; shift ;;
-      --max-iterations) MAX_ITERATIONS="$2"; shift 2 ;;
-      --completion-promise) COMPLETION_PROMISE="$2"; shift 2 ;;
-      --test-cmd) TEST_CMD="$2"; shift 2 ;;
-      *) prompt_parts+=("$1"); shift ;;
-    esac
-  done
   PROMPT="${prompt_parts[*]:-}"
 fi
 
@@ -56,11 +52,24 @@ if [[ -z "$PROMPT" ]]; then
   exit 1
 fi
 
-if [[ -f "$STATE_FILE" ]] && [ "$FORCE" = false ]; then
-  echo "Error: An active Ralph loop already exists. Run ./scripts/cancel-ralph.sh or pass --force." >&2
+if [[ "$COMPLETION_PROMISE$TEST_CMD" == *$'\n'* ]]; then
+  echo "Error: --completion-promise and --test-cmd must be single-line" >&2
   exit 1
 fi
 
+if [[ -n "$(git -C "$PROJECT_ROOT" ls-files ':(icase).ralph')" ]]; then
+  echo "Error: .ralph is tracked by git. Untrack it: TEST_COMMAND must not come from the repository." >&2
+  exit 1
+fi
+
+if [[ -f "$STATE_FILE" ]] && [ "$FORCE" = false ]; then
+  echo "Error: An active Ralph loop already exists. Run $SCRIPT_DIR/cancel-ralph.sh or pass --force." >&2
+  exit 1
+fi
+
+BASE_COMMIT="$(git -C "$PROJECT_ROOT" rev-parse --verify -q HEAD)" || { echo "Error: Ralph loop needs a commit as its baseline for the test integrity guard." >&2; exit 1; }
+
+rm -f "$STATE_DIR/cli.pid"
 mkdir -p "$STATE_DIR"
 
 cat <<EOF > "$PLAN_FILE"
@@ -86,13 +95,15 @@ EOF
 
 INITIAL_TASK_COUNT=$(grep -Ec "^[[:space:]]*- \[([ xX])\]" "$PLAN_FILE" || echo "3")
 
-cat <<EOF > "$STATE_FILE"
+cat > "$STATE_FILE.tmp" <<EOF
 ITERATION=1
 MAX_ITERATIONS=$MAX_ITERATIONS
 COMPLETION_PROMISE=$COMPLETION_PROMISE
 TEST_COMMAND=$TEST_CMD
+BASE_COMMIT=$BASE_COMMIT
 INITIAL_TASK_COUNT=$INITIAL_TASK_COUNT
 STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
+mv "$STATE_FILE.tmp" "$STATE_FILE"
 
 echo "Ralph loop initialized (Iteration 1, Max: ${MAX_ITERATIONS:-unlimited}, Promise: ${COMPLETION_PROMISE:-none})"
