@@ -4,9 +4,12 @@ umask 077
 
 # $1 names the host whose output contract applies; Cursor is the only one that reads followup_message
 HOST="${1:-}"
-RAW_INPUT="$(cat || true)"
-HOOK_DIR="$(printf '%s' "$RAW_INPUT" | jq -r '.cwd // .workspace_roots[0] // empty' 2>/dev/null || true)"
-cd "${HOOK_DIR:-.}" 2>/dev/null || exit 0
+source "$(dirname "${BASH_SOURCE[0]}")/lib/json.sh"
+RAW_INPUT="$(LC_ALL=C tr '\n' ' ' || true)"
+# shortcut: paths are not JSON-decoded, so a cwd containing a backslash or quote (Windows paths) will not resolve
+HOOK_DIR="$(printf '%s' "$RAW_INPUT" | json_raw cwd)"
+[[ -n "$HOOK_DIR" ]] || HOOK_DIR="$(printf '%s' "$RAW_INPUT" | json_raw workspace_roots)"
+cd "${HOOK_DIR:-${CLAUDE_PROJECT_DIR:-.}}" 2>/dev/null || exit 0
 
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 cd "$PROJECT_ROOT"
@@ -17,8 +20,6 @@ PLAN_FILE="$STATE_DIR/fix_plan.md"
 if [[ ! -f "$STATE_FILE" ]]; then
   exit 0
 fi
-
-command -v jq >/dev/null || { echo "Ralph loop: jq is required by the stop hook." >&2; exit 1; }
 
 # TEST_COMMAND is read from this file and executed on every stop, so refuse a state file another user owns
 if [[ ! -O "$STATE_FILE" ]]; then
@@ -84,10 +85,12 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   esac
 done < "$STATE_FILE"
 
-LAST_MSG="$(printf '%s' "$RAW_INPUT" | jq -r '.last_assistant_message // empty' 2>/dev/null || true)"
+# Promises are matched on the raw JSON content, not a decoded copy: undo the escapes hosts apply to < > / and whitespace.
+# Go-style JSON encoders emit \u003c and \u003e. Setup rejects promises whose raw form differs from their text.
+LAST_MSG="$(printf '%s' "$RAW_INPUT" | json_raw last_assistant_message | LC_ALL=C sed 's/\\u003[cC]/</g;s/\\u003[eE]/>/g;s/\\\//\//g;s/\\[ntr]/ /g')"
 
 # The loop belongs to the first session that stops in it. Payloads without session_id (headless CLI, other hosts) are not bound.
-PAYLOAD_SESSION_ID="$(printf '%s' "$RAW_INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)"
+PAYLOAD_SESSION_ID="$(printf '%s' "$RAW_INPUT" | json_raw session_id)"
 if [[ -n "$PAYLOAD_SESSION_ID" ]]; then
   if [[ -z "$SESSION_ID" ]]; then
     SESSION_ID="$PAYLOAD_SESSION_ID"
@@ -99,7 +102,7 @@ fi
 
 # Cursor reports how the run ended; an aborted run neither verifies nor advances the loop
 if [[ "$HOST" == cursor ]]; then
-  RUN_STATUS="$(printf '%s' "$RAW_INPUT" | jq -r '.status // empty' 2>/dev/null || true)"
+  RUN_STATUS="$(printf '%s' "$RAW_INPUT" | json_raw status)"
   if [[ -n "$RUN_STATUS" && "$RUN_STATUS" != completed ]]; then
     echo '{}'
     exit 0
@@ -111,7 +114,7 @@ has_exact_promise() {
   local expected="$2"
   [[ -z "$expected" ]] && return 1
 
-  printf "%s\n" "$text" | awk -v expected="$expected" '
+  printf "%s\n" "$text" | LC_ALL=C awk -v expected="$expected" '
     BEGIN { matched = 0 }
     {
       while (match($0, /<promise>[[:space:]]*[^<]*[[:space:]]*<\/promise>/)) {
@@ -145,7 +148,7 @@ TEST_STATUS=0
 
 # Final stdout when the loop ends: Cursor reads only followup_message, so it gets {}; other hosts show the notice to the user
 end_output() {
-  if [[ "$HOST" == cursor ]]; then echo '{}'; else jq -n --arg m "$MSG" '{systemMessage:$m}'; fi
+  if [[ "$HOST" == cursor ]]; then echo '{}'; else printf '{"systemMessage":%s}\n' "$(printf '%s' "$MSG" | json_str)"; fi
 }
 
 # shortcut: state.env is writable by the agent, so TEST_COMMAND runs with whatever the agent wrote there. Full fix needs state outside the agent's writable scope (e.g. a sandbox deny rule on .ralph/state.env).
@@ -247,11 +250,12 @@ else
   SYS_MSG="Ralph loop iteration $NEXT_ITER"
 fi
 
-# Feedback goes through stdin: a --arg value is capped by the OS (~128 KiB per argument on Linux)
+# Feedback goes through stdin: a command-line argument is capped by the OS (~128 KiB on Linux)
 if [[ "$HOST" == cursor ]]; then
-  RESULT="$(printf '%s' "$FEEDBACK" | jq -Rs '{followup_message: .}')"
+  RESULT="{\"followup_message\":$(printf '%s' "$FEEDBACK" | json_str)}"
 else
-  RESULT="$(printf '%s' "$FEEDBACK" | jq -Rs --arg msg "$SYS_MSG" '{decision: "block", reason: ., systemMessage: $msg}')"
+  [[ -z "${RALPH_FEEDBACK_FILE:-}" ]] || printf '%s' "$FEEDBACK" > "$RALPH_FEEDBACK_FILE"
+  RESULT="{\"decision\":\"block\",\"reason\":$(printf '%s' "$FEEDBACK" | json_str),\"systemMessage\":$(printf '%s' "$SYS_MSG" | json_str)}"
 fi
 
 # Advance only after the output is built, so a failed build cannot leave the loop advanced with no feedback
