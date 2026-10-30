@@ -7,11 +7,12 @@ Ralph Wiggum is an autonomous development loop plugin for AI coding assistants, 
 ## Why Use?
 
 - **Zero-Babysitting Autonomy:** The agent picks the next priority from the implementation plan, writes code, runs tests, and self-corrects without requiring manual intervention every turn.
-- **Zero Runtime Dependencies:** Pure Bash script engine. No Python, Node.js, Ruby, or external pip/npm packages required.
+- **Minimal Dependencies:** Bash scripts plus `jq` for hook JSON. No Python, Node.js, Ruby, or pip/npm packages required.
 - **Living Backlog & Persistent Scheduler:** Tracks work items, acceptance criteria, and verified progress in `.ralph/fix_plan.md`.
 - **No More Half-Done Code:** Strictly terminates only when your success promise (`<promise>COMPLETE</promise>`) is genuinely verified and all work items are complete.
-- **Test Integrity Guard:** Deterministically verifies that test files are not deleted or tampered with to bypass test backpressure.
-- **Works Across All Agents:** Compatible with **Claude Code**, **Cursor**, **OpenAI Codex**, **Google Antigravity**, and **GitHub Copilot**.
+- **Test Integrity Guard:** Deterministically verifies that existing test files are not deleted to bypass test backpressure.
+- **Git-Clean State:** Setup writes `.ralph/` to `.git/info/exclude` and does not touch `.gitignore`.
+- **Works Across All Agents:** Compatible with **Claude Code**, **Cursor**, **OpenAI Codex**, **Google Antigravity**, and **GitHub Copilot**. The `<promise>` is read only from the agent's final reply; this is verified on Claude Code and Codex. Antigravity's Stop payload carries no final reply, so its loop ends only at max iterations; Cursor and Copilot are unverified. Antigravity reads its hook from the root `hooks.json`.
 - **Safety First:** Safe default iteration cap (`--max-iterations 10`), continuous per-turn test verification (`--test-cmd`), and instant cancellation (`/cancel-ralph` or `Ctrl+C`).
 
 ---
@@ -20,9 +21,9 @@ Ralph Wiggum is an autonomous development loop plugin for AI coding assistants, 
 
 | Environment | Supported | Requirements / Notes |
 | :--- | :---: | :--- |
-| **Linux** | **Yes** | Bash 4.0+ and core tools (`git`, `awk`, `sed`, `grep`, `date`). |
-| **macOS** | **Yes** | Native Terminal / zsh / bash with standard CLI utilities. |
-| **Windows (Git Bash)** | **Yes** | Git Bash (bundled with Git for Windows). |
+| **Linux** | **Yes** | Bash 4.0+, `jq`, and core tools (`git`, `awk`, `sed`, `grep`, `date`). |
+| **macOS** | **Yes** | Native Terminal / zsh / bash with `jq` and standard CLI utilities. `--test-cmd` is time-limited only when `timeout` or `gtimeout` is installed (`brew install coreutils`). |
+| **Windows (Git Bash)** | **Yes** | Git Bash (bundled with Git for Windows) plus `jq`. |
 | **Windows (WSL)** | **Yes** | WSL (Ubuntu, Debian, or any Linux distro). |
 | **Windows (CMD / PowerShell)** | _Via Git Bash / WSL_ | Requires Git Bash or WSL terminal environment. |
 
@@ -83,7 +84,7 @@ Conformant clients discover `skills/` and `plugin.json` automatically:
 | Flag                          |  Required  | Description                                                                                                                                                                          |
 | :---------------------------- | :--------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `PROMPT`                      |  **Yes**   | The task description, constraints, and goal for the agent.                                                                                                                           |
-| `--max-iterations <N>`        | _Optional_ | Safety ceiling on turns (default: 10). Note: interactive chat hosts enforce a 5-10 turn runaway guard; use `./scripts/ralph-cli.sh` for unbounded loops (0 = unlimited).             |
+| `--max-iterations <N>`        | _Optional_ | Safety ceiling on turns (default: 10). Use `<plugin-dir>/scripts/ralph-cli.sh` for unattended runs; it exits non-zero when the ceiling is reached (0 = unlimited).                         |
 | `--completion-promise <TEXT>` | _Optional_ | Stops the loop early the moment the agent verifies and outputs `<promise>TEXT</promise>`.                                                                                            |
 | `--test-cmd <COMMAND>`        | _Optional_ | Hard backpressure: Executes test command (`exit code 0`) on every turn before promise is accepted.                                                                                   |
 
@@ -147,10 +148,10 @@ For unbounded overnight tasks beyond chat host continuation limits:
 
 ```bash
 # 1. Initialize loop state
-./scripts/setup-ralph-loop.sh "Fix all compiler errors in src/" --max-iterations 0 --test-cmd "cargo test"
+<plugin-dir>/scripts/setup-ralph-loop.sh "Fix all compiler errors in src/" --max-iterations 0 --test-cmd "cargo test"
 
 # 2. Start process loop
-./scripts/ralph-cli.sh .ralph/fix_plan.md
+<plugin-dir>/scripts/ralph-cli.sh .ralph/fix_plan.md
 ```
 
 ---
@@ -159,16 +160,16 @@ For unbounded overnight tasks beyond chat host continuation limits:
 
 - **Claude Code:** `/cancel-ralph`
 - **Cursor / Antigravity / Codex / Copilot (Chat):** `Cancel active ralph loop` or `Stop ralph loop`
-- **Terminal / CLI:** `./scripts/cancel-ralph.sh` or `Ctrl+C`
+- **Terminal / CLI:** `<plugin-dir>/scripts/cancel-ralph.sh` or `Ctrl+C`
 
 ---
 
 ## Safety & Controls
 
 1. **Deterministic Exit & Continuous Backpressure:** `--test-cmd` is executed on every iteration to guarantee immediate error feedback and verify all tests pass before accepting `<promise>TEXT</promise>`.
-2. **Test Integrity Guard:** Blocks completion if existing test files are deleted or tampered with to bypass test backpressure.
+2. **Test Integrity Guard:** Blocks completion if existing test files are deleted to bypass test backpressure.
 3. **Clean Cancellation & Signal Trapping:** Handles `SIGINT` (`Ctrl+C`) and `SIGTERM` in CLI runner to clean up `.ralph` state instantly.
-4. **Safety Ceiling:** Built-in default `--max-iterations 10` aligned with host continuation limits to prevent unexpected token spend on impossible tasks.
+4. **Safety Ceiling:** Built-in default `--max-iterations 10` to prevent unexpected token spend on impossible tasks.
 
 ---
 

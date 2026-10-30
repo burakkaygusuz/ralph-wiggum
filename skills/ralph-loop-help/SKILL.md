@@ -11,17 +11,17 @@ The Ralph loop executes continuous, test-driven iterations over a living impleme
 
 - **State & Fix Plan:** State is tracked in `.ralph/state.env` and the persistent backlog in `.ralph/fix_plan.md`.
 - **Completion Promise:** Stopping token wrapped in `<promise>TEXT</promise>`, emitted only when criteria pass.
-- **Max Iterations:** Bounded turn limit (default: 10). Note that interactive chat hosts enforce a 5-10 turn runaway guard; use `./scripts/ralph-cli.sh` for unbounded execution.
+- **Max Iterations:** Bounded turn limit (default: 10, 0 for unbounded). For unattended runs, use `${CLAUDE_PLUGIN_ROOT}/scripts/ralph-cli.sh`.
 - **Hard Backpressure:** Automated execution of `--test-cmd` on every turn before completion is accepted.
 
 ## Prompt Guidelines
 
 1. **Include Verifiable Tests:** Pass `--test-cmd "npm test"` or `--test-cmd "pytest"`.
 2. **Define a Clear Promise:** Use specific tokens like `--completion-promise "AUTH_READY"`.
-3. **Bound Total Turns:** Specify `--max-iterations 10`.
+3. **Bound Total Turns:** Specify `--max-iterations 10` (the default) or a smaller value.
 
 ## Commands & Scripts
 
-- `/ralph-loop [PROMPT] [FLAGS]` or `./scripts/setup-ralph-loop.sh`
-- `/cancel-ralph` or `./scripts/cancel-ralph.sh`
-- `./scripts/ralph-cli.sh` for headless out-of-process execution.
+- `/ralph-loop [PROMPT] [FLAGS]` or `${CLAUDE_PLUGIN_ROOT}/scripts/setup-ralph-loop.sh`
+- `/cancel-ralph` or `${CLAUDE_PLUGIN_ROOT}/scripts/cancel-ralph.sh`
+- `${CLAUDE_PLUGIN_ROOT}/scripts/ralph-cli.sh` for headless out-of-process execution.

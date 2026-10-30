@@ -29,4 +29,4 @@ When participating in an iterative Ralph development loop:
 6. **Scheduler, Learnings & Plan Update:**
    - Record newly discovered architectural insights and quirks in `Working Memory & Cross-Turn Learnings`.
    - Mark the completed work item as `[x]` and document verification evidence in `.ralph/fix_plan.md`.
-   - If `--completion-promise` is set, output `<promise>PHRASE</promise>` in your response AND append it under Completed Work in `.ralph/fix_plan.md` **ONLY** when all work items and test criteria are completely verified.
+   - If `--completion-promise` is set, output `<promise>PHRASE</promise>` in your final reply **ONLY** when all work items and test criteria are completely verified. Do not write the promise to `.ralph/fix_plan.md`; the stop hook reads it only from your final reply (`last_assistant_message`). Promise detection is verified on Claude Code and Codex. Antigravity's Stop payload has no `last_assistant_message`, so there the loop ends only at max iterations; Cursor and Copilot are unverified.

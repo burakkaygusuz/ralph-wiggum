@@ -11,5 +11,5 @@ Aborts any active Ralph loop and cleans up workspace state.
 
 Run the cancellation script:
 ```bash
-./scripts/cancel-ralph.sh
+${CLAUDE_PLUGIN_ROOT}/scripts/cancel-ralph.sh
 ```

@@ -5,7 +5,7 @@
       "id": 1,
       "prompt": "Run a ralph loop to implement user authentication with JWT, add unit tests, and output <promise>AUTH_DONE</promise> when all pass. Max 20 iterations.",
       "should_trigger": true,
-      "expected_output": "Initializes Ralph loop with max_iterations=20 and completion_promise='AUTH_DONE', then iterates autonomously until verified."
+      "expected_output": "Initializes Ralph loop with max_iterations=20 and completion_promise='AUTH_DONE'. The loop must NOT be treated as complete from the promise text in the prompt alone: the stop hook only accepts <promise>AUTH_DONE</promise> in the agent's own final reply, and only after tests pass and every plan item is checked. Until then the agent keeps iterating."
     },
     {
       "id": 2,
