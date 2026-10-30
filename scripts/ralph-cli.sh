@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_BIN="${AGENT_BIN:-claude}"
 STOP_HOOK="$SCRIPT_DIR/stop-hook.sh"
 
-[[ ! -f "$PLAN_FILE" || ! -f "$STATE_FILE" ]] && { echo "Error: Ralph loop not initialized. Run ./scripts/setup-ralph-loop.sh first." >&2; exit 1; }
+[[ ! -f "$PLAN_FILE" || ! -f "$STATE_FILE" ]] && { echo "Error: Ralph loop not initialized. Run ${SCRIPT_DIR}/setup-ralph-loop.sh first." >&2; exit 1; }
 
 if [[ -f "$PID_FILE" ]]; then
   EXISTING_PID=$(cat "$PID_FILE" 2>/dev/null || true)
@@ -22,13 +22,14 @@ if [[ -f "$PID_FILE" ]]; then
 fi
 
 echo "$$" > "$PID_FILE"
+trap 'rm -f "$PID_FILE"' EXIT
 
 cleanup() {
   echo -e "\nRalph loop canceled by user."
   rm -rf "$STATE_DIR"
   exit 130
 }
-trap cleanup INT TERM
+trap cleanup INT TERM HUP
 
 read_state() {
   ITERATION=1
@@ -47,53 +48,50 @@ read_state() {
   done < "$STATE_FILE"
 }
 
-extract_feedback() {
-  local json="$1"
-  printf "%s\n" "$json" | awk -F"\"reason\": \"" '
-    NF > 1 {
-      val = $2
-      sub(/",[\r\n[:space:]]*"followup_message".*/, "", val)
-      sub(/",[\r\n[:space:]]*"decision".*/, "", val)
-      sub(/"[\r\n[:space:]]*}[[:space:]]*$/, "", val)
-      gsub(/\\n/, "\n", val)
-      gsub(/\\t/, "\t", val)
-      gsub(/\\"/, "\"", val)
-      gsub(/\\\\/, "\\", val)
-      print val
-    }
-  '
-}
-
 read_state
 echo "Starting Ralph Loop on '$PLAN_FILE' with '$AGENT_BIN' (Max: $MAX_ITERATIONS)..."
 
 CURRENT_PROMPT="$(cat "$PLAN_FILE")"
+EXIT_CODE=0
 
 while :; do
-  [[ ! -f "$STATE_FILE" ]] && { echo "Ralph loop completed or state removed."; break; }
-
   read_state
-  ITER="${ITERATION:-1}"
-  [[ "$MAX_ITERATIONS" -gt 0 && "$ITER" -gt "$MAX_ITERATIONS" ]] && { echo "Max iterations ($MAX_ITERATIONS) reached."; break; }
+  ITER="$ITERATION"
+  [[ "$MAX_ITERATIONS" -gt 0 && "$ITER" -gt "$MAX_ITERATIONS" ]] && { echo "Max iterations ($MAX_ITERATIONS) reached."; EXIT_CODE=1; break; }
 
   echo "=== [Iteration $ITER${MAX_ITERATIONS:+ of $MAX_ITERATIONS}] ==="
-  OUTPUT=$("$AGENT_BIN" --print -p "$CURRENT_PROMPT" 2>&1) || {
+  OUTPUT=$("$AGENT_BIN" --print -p "$CURRENT_PROMPT" </dev/null) || {
     echo "Agent process exited on iteration $ITER."
+    EXIT_CODE=1
     break
   }
   echo "$OUTPUT"
 
-  if [[ -x "$STOP_HOOK" ]]; then
-    HOOK_RESULT=$(printf '%s\n' "$OUTPUT" | "$STOP_HOOK" 2>&1 || true)
-    [[ ! -d "$STATE_DIR" ]] && { echo "Ralph loop finished successfully."; break; }
+  HOOK_ERR_FILE="$(mktemp)"
+  HOOK_RESULT=$(jq -n --arg m "$OUTPUT" '{last_assistant_message: $m}' | RALPH_CLI=1 "$STOP_HOOK" 2>"$HOOK_ERR_FILE" || true)
+  HOOK_ERR="$(cat "$HOOK_ERR_FILE")"
+  rm -f "$HOOK_ERR_FILE"
+  [[ -n "$HOOK_ERR" ]] && echo "$HOOK_ERR" >&2
 
-    FEEDBACK=$(extract_feedback "$HOOK_RESULT")
-    if [[ -n "$FEEDBACK" ]]; then
-      CURRENT_PROMPT="$FEEDBACK"
-    elif [[ -f "$PLAN_FILE" ]]; then
-      CURRENT_PROMPT="$(cat "$PLAN_FILE")"
+  if [[ ! -f "$STATE_FILE" ]]; then
+    if grep -q '^Ralph loop: Verified' <<< "$HOOK_ERR"; then
+      echo "Ralph loop finished successfully."
+    else
+      [[ "$HOOK_ERR" == *"Max iterations"* ]] || echo "Ralph loop: state removed without verification." >&2
+      EXIT_CODE=1
     fi
+    break
   fi
+
+  read_state
+  if [[ "$ITERATION" -le "$ITER" ]]; then
+    echo "Error: stop hook did not advance the loop past iteration $ITER." >&2
+    EXIT_CODE=1
+    break
+  fi
+
+  FEEDBACK="$(jq -r '.reason // empty' <<< "$HOOK_RESULT" 2>/dev/null || true)"
+  CURRENT_PROMPT="${FEEDBACK:-$(cat "$PLAN_FILE")}"
 done
 
-rm -f "$PID_FILE" 2>/dev/null || true
+exit "$EXIT_CODE"
