@@ -687,7 +687,7 @@ test_json_str_escapes_exactly() {
     printf '%s' "$c" > want.txt
     jq -j . got.json | cmp - want.txt
   done
-  head -c 900000 /dev/urandom | base64 | head -c 1200000 | tr 'AB' '"\\' > big.txt
+  head -c 900000 /dev/urandom | base64 | tr 'AB' '"\\' > big.txt
   json_str < big.txt > got.json
   jq -j . got.json | cmp - big.txt
   awk 'BEGIN { for (i = 0; i < 1200000; i++) print "" }' > blank.txt # 1.2 M empty lines took 6.5 s without the awk fast path
@@ -712,7 +712,7 @@ test_json_raw_ignores_escaped_decoys() {
   done
   # decoy only inside an escaped string: no real key exists
   test -z "$(json_raw session_id <<< '{"m":"x \"session_id\":\"evil\" y"}')"
-  head -c 900000 /dev/urandom | base64 | head -c 1200000 | tr 'AB' '"\\' | tr -d '\n' > big.txt
+  head -c 900000 /dev/urandom | base64 | tr 'AB' '"\\' | tr -d '\n' > big.txt
   jq -c -n --rawfile m big.txt '{last_assistant_message:$m,session_id:"s"}' > big.json
   test "$(json_raw session_id < big.json)" = s
   test "$(json_raw last_assistant_message < big.json | wc -c)" -gt 1200000
