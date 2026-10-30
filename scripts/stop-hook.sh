@@ -1,12 +1,37 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
-PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+RAW_INPUT="$(cat || true)"
+HOOK_DIR="$(printf '%s' "$RAW_INPUT" | jq -r '.cwd // .workspacePaths[0] // empty' 2>/dev/null || true)"
+cd "${HOOK_DIR:-.}" 2>/dev/null || exit 0
+
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$PROJECT_ROOT"
 STATE_DIR="$PROJECT_ROOT/.ralph"
 STATE_FILE="$STATE_DIR/state.env"
 PLAN_FILE="$STATE_DIR/fix_plan.md"
 
 if [[ ! -f "$STATE_FILE" ]]; then
+  exit 0
+fi
+
+command -v jq >/dev/null || { echo "Ralph loop: jq is required by the stop hook." >&2; exit 1; }
+
+# TEST_COMMAND is read from this file and executed on every stop, so refuse a state file another user owns
+if [[ ! -O "$STATE_FILE" ]]; then
+  echo "Ralph loop: refusing $STATE_FILE because it is not owned by the current user." >&2
+  exit 0
+fi
+
+if [[ -n "$(git ls-files ':(icase).ralph')" ]]; then
+  echo "Ralph loop: refusing $STATE_DIR because it is tracked by git." >&2
+  exit 0
+fi
+
+# The headless CLI advances the loop itself; the plugin hook must not run during its agent calls.
+CLI_PID="$(cat "$STATE_DIR/cli.pid" 2>/dev/null || true)"
+if [[ -z "${RALPH_CLI:-}" && -n "$CLI_PID" ]] && kill -0 "$CLI_PID" 2>/dev/null; then
   exit 0
 fi
 
@@ -25,21 +50,18 @@ acquire_lock() {
   done
 }
 
-release_lock() {
-  rm -rf "$STATE_DIR/.lock" 2>/dev/null || true
-}
-
 acquire_lock
+trap 'rm -rf "$STATE_DIR/.lock" 2>/dev/null || true' EXIT
 
 if [[ ! -f "$STATE_FILE" ]]; then
-  release_lock
   exit 0
 fi
 
 ITERATION=1
-MAX_ITERATIONS=25
+MAX_ITERATIONS=10
 COMPLETION_PROMISE=""
 TEST_COMMAND=""
+BASE_COMMIT=""
 INITIAL_TASK_COUNT=1
 STARTED_AT=""
 
@@ -49,36 +71,14 @@ while IFS="=" read -r key val || [[ -n "$key" ]]; do
     MAX_ITERATIONS) [[ "$val" =~ ^[0-9]+$ ]] && MAX_ITERATIONS="$val" ;;
     COMPLETION_PROMISE) COMPLETION_PROMISE="$val" ;;
     TEST_COMMAND) TEST_COMMAND="$val" ;;
+    BASE_COMMIT) BASE_COMMIT="$val" ;;
     INITIAL_TASK_COUNT) [[ "$val" =~ ^[0-9]+$ ]] && INITIAL_TASK_COUNT="$val" ;;
     STARTED_AT) STARTED_AT="$val" ;;
   esac
 done < "$STATE_FILE"
 
-RAW_INPUT="$(cat || true)"
-
-IS_ANTIGRAVITY=false
-if echo "$RAW_INPUT" | grep -Eq '"executionNum"|"fullyIdle"'; then
-  IS_ANTIGRAVITY=true
-fi
-
-NORMALIZED_INPUT="$(printf "%s" "$RAW_INPUT" | sed 's/\\</</g; s/\\>/>/g; s/\\"/\"/g; s/\\n/ /g')"
-
-TRANSCRIPT_PATH=$(echo "$RAW_INPUT" | sed -n -E 's/.*"(transcriptPath|transcript_path|TranscriptPath)":[[:space:]]*"([^"]*)".*/\2/p')
-if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
-  TRANSCRIPT_TAIL=$(tail -n 50 "$TRANSCRIPT_PATH" 2>/dev/null || true)
-  NORMALIZED_INPUT="$NORMALIZED_INPUT $(printf "%s" "$TRANSCRIPT_TAIL" | sed 's/\\</</g; s/\\>/>/g; s/\\"/\"/g; s/\\n/ /g')"
-fi
-
-PLAN_CONTENT=""
-if [[ -f "$PLAN_FILE" ]]; then
-  PLAN_CONTENT=$(cat "$PLAN_FILE")
-  NORMALIZED_INPUT="$NORMALIZED_INPUT $(printf "%s" "$PLAN_CONTENT" | sed 's/\\</</g; s/\\>/>/g; s/\\"/\"/g; s/\\n/ /g')"
-fi
-
-LATEST_COMMIT_MSG=$(git log -1 --pretty=%B 2>/dev/null || true)
-if [[ -n "$LATEST_COMMIT_MSG" ]]; then
-  NORMALIZED_INPUT="$NORMALIZED_INPUT $LATEST_COMMIT_MSG"
-fi
+IS_ANTIGRAVITY="$(printf '%s' "$RAW_INPUT" | jq -r 'has("executionNum")' 2>/dev/null || true)"
+LAST_MSG="$(printf '%s' "$RAW_INPUT" | jq -r '.last_assistant_message // empty' 2>/dev/null || true)"
 
 has_exact_promise() {
   local text="$1"
@@ -117,19 +117,11 @@ has_unchecked_items() {
 TEST_FEEDBACK=""
 TEST_STATUS=0
 
-# Execute hard backpressure on EVERY turn if TEST_COMMAND is provided
 if [[ -n "$TEST_COMMAND" ]]; then
+  TIMEOUT_CMD="$(command -v timeout || command -v gtimeout || true)"
   set +e
-  if command -v timeout >/dev/null 2>&1; then
-    TEST_OUTPUT=$(timeout 120 bash -c "$TEST_COMMAND" 2>&1)
-    TEST_STATUS=$?
-  elif command -v gtimeout >/dev/null 2>&1; then
-    TEST_OUTPUT=$(gtimeout 120 bash -c "$TEST_COMMAND" 2>&1)
-    TEST_STATUS=$?
-  else
-    TEST_OUTPUT=$(bash -c "$TEST_COMMAND" 2>&1)
-    TEST_STATUS=$?
-  fi
+  TEST_OUTPUT=$(${TIMEOUT_CMD:+"$TIMEOUT_CMD" 120} bash -c "$TEST_COMMAND" 2>&1)
+  TEST_STATUS=$?
   set -e
 
   if [[ "$TEST_STATUS" -ne 0 ]]; then
@@ -139,34 +131,36 @@ if [[ -n "$TEST_COMMAND" ]]; then
   fi
 fi
 
-# Anti-Cheating & Integrity Guard: Detect deleted/tampered test files
-DELETED_TESTS=$(git status --short 2>/dev/null | grep -E "^[[:space:]]*D[[:space:]]+.*(test|spec).*" || true)
+TEST_PATH_RE='(^|/)(tests?|__tests__|specs?)/|(^|/)test_[^/]*\.py$|[._](test|spec)\.|(Test|Tests)\.(java|kt|cs)$'
+if ! DELETED_FILES="$(git -c core.quotePath=false diff --no-renames --name-only --diff-filter=D "$BASE_COMMIT")"; then
+  DELETED_TESTS="unknown (git diff against $BASE_COMMIT failed)"
+else
+  DELETED_TESTS="$(grep -E "$TEST_PATH_RE" <<< "$DELETED_FILES" || true)"
+fi
 if [[ -n "$DELETED_TESTS" ]]; then
   TEST_FEEDBACK+=$'\n\n'"[Test Integrity Guard Alert: Existing test files were deleted: $DELETED_TESTS. Revert deletions and fix application code.]"
 fi
 
-# Plan Integrity Guard: Count total and completed items
-TOTAL_TASKS=$(grep -Ec "^[[:space:]]*- \[([ xX])\]" "$PLAN_FILE" 2>/dev/null || echo "0")
+TOTAL_TASKS=$(grep -Ec "^[[:space:]]*- \[([ xX])\]" "$PLAN_FILE" 2>/dev/null || true)
+TOTAL_TASKS=${TOTAL_TASKS:-0}
 if [[ "$TOTAL_TASKS" -lt "$INITIAL_TASK_COUNT" ]]; then
   TEST_FEEDBACK+=$'\n\n'"[Plan Integrity Guard Alert: Work items were deleted from fix_plan.md ($TOTAL_TASKS < $INITIAL_TASK_COUNT). Restore required tasks.]"
 fi
 
 PROMISE_MATCHED=false
 if [[ -n "$COMPLETION_PROMISE" ]]; then
-  if has_exact_promise "$NORMALIZED_INPUT" "$COMPLETION_PROMISE"; then
+  if has_exact_promise "$LAST_MSG" "$COMPLETION_PROMISE"; then
     PROMISE_MATCHED=true
   fi
 else
-  if has_exact_promise "$NORMALIZED_INPUT" "COMPLETE" || has_exact_promise "$NORMALIZED_INPUT" "DONE"; then
+  if has_exact_promise "$LAST_MSG" "COMPLETE" || has_exact_promise "$LAST_MSG" "DONE"; then
     PROMISE_MATCHED=true
   fi
 fi
 
-# 1. First: Evaluate completion criteria for the current turn
 if [ "$PROMISE_MATCHED" = true ] && [ "$TEST_STATUS" -eq 0 ] && [[ -z "$DELETED_TESTS" ]] && [[ "$TOTAL_TASKS" -ge "$INITIAL_TASK_COUNT" ]]; then
   if ! has_unchecked_items "$PLAN_FILE"; then
     echo "Ralph loop: Verified with test command '$TEST_COMMAND' and all plan items complete!" >&2
-    release_lock
     rm -rf "$STATE_DIR"
     if [ "$IS_ANTIGRAVITY" = true ]; then
       echo '{"decision": "stop"}'
@@ -179,10 +173,8 @@ if [ "$PROMISE_MATCHED" = true ] && [ "$TEST_STATUS" -eq 0 ] && [[ -z "$DELETED_
   fi
 fi
 
-# 2. Second: If not completed, evaluate if max iterations has been reached
 if [[ "$MAX_ITERATIONS" -gt 0 && "$ITERATION" -ge "$MAX_ITERATIONS" ]]; then
   echo "Ralph loop: Max iterations ($MAX_ITERATIONS) reached without satisfying completion criteria." >&2
-  release_lock
   rm -rf "$STATE_DIR"
   if [ "$IS_ANTIGRAVITY" = true ]; then
     echo '{"decision": "stop"}'
@@ -192,20 +184,18 @@ if [[ "$MAX_ITERATIONS" -gt 0 && "$ITERATION" -ge "$MAX_ITERATIONS" ]]; then
   exit 0
 fi
 
-# 3. Third: Advance iteration and feed back
 NEXT_ITER=$((ITERATION + 1))
 
-cat <<EOF > "$STATE_FILE.tmp"
+cat > "$STATE_FILE.tmp" <<EOF
 ITERATION=$NEXT_ITER
 MAX_ITERATIONS=$MAX_ITERATIONS
 COMPLETION_PROMISE=$COMPLETION_PROMISE
 TEST_COMMAND=$TEST_COMMAND
+BASE_COMMIT=$BASE_COMMIT
 INITIAL_TASK_COUNT=$INITIAL_TASK_COUNT
 STARTED_AT=$STARTED_AT
 EOF
 mv "$STATE_FILE.tmp" "$STATE_FILE"
-
-release_lock
 
 GIT_PARTS=""
 GIT_STATUS="$(git status --short 2>/dev/null || true)"
@@ -234,32 +224,8 @@ fi
 
 FEEDBACK="${PLAN_BODY}${GIT_CTX}${TEST_FEEDBACK}"
 
-json_escape() {
-  awk '
-    BEGIN { first = 1 }
-    {
-      gsub(/\\/, "\\\\")
-      gsub(/"/, "\\\"")
-      gsub(/\r/, "")
-      gsub(/\t/, "\\t")
-      if (!first) {
-        printf "\\n"
-      }
-      printf "%s", $0
-      first = 0
-    }
-  '
-}
-
-ESC_FEEDBACK="$(printf "%s" "$FEEDBACK" | json_escape)"
-
 if [ "$IS_ANTIGRAVITY" = true ]; then
-  cat <<EOF
-{
-  "decision": "continue",
-  "reason": "$ESC_FEEDBACK"
-}
-EOF
+  jq -n --arg reason "$FEEDBACK" '{decision: "continue", reason: $reason}'
 else
   if [[ "$MAX_ITERATIONS" -gt 0 ]]; then
     SYS_MSG="Ralph loop iteration $NEXT_ITER of $MAX_ITERATIONS"
@@ -267,12 +233,6 @@ else
     SYS_MSG="Ralph loop iteration $NEXT_ITER"
   fi
 
-  cat <<EOF
-{
-  "decision": "block",
-  "reason": "$ESC_FEEDBACK",
-  "followup_message": "$ESC_FEEDBACK",
-  "systemMessage": "$SYS_MSG"
-}
-EOF
+  jq -n --arg reason "$FEEDBACK" --arg msg "$SYS_MSG" \
+    '{decision: "block", reason: $reason, followup_message: $reason, systemMessage: $msg}'
 fi

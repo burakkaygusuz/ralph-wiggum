@@ -3,9 +3,9 @@
   "hooks": {
     "stop": [
       {
-        "command": "${CURSOR_PLUGIN_ROOT:-.}/scripts/stop-hook.sh",
+        "command": "\"${CURSOR_PLUGIN_ROOT}/scripts/stop-hook.sh\"",
         "loop_limit": 25,
-        "timeout": 120
+        "timeout": 180
       }
     ]
   }

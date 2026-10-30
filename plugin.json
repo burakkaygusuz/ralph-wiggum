@@ -24,9 +24,6 @@
     "com.openai.codex": {
       "hooks": "./hooks/hooks.json"
     },
-    "com.google.antigravity": {
-      "hooks": "./hooks/antigravity-hooks.json"
-    },
     "com.github.copilot": {
       "hooks": "./hooks/hooks.json"
     }
