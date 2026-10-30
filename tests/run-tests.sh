@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$SCRIPT_DIR"
-
-chmod +x scripts/*.sh
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+chmod +x "$ROOT"/scripts/*.sh
 
 PASSED=0
 FAILED=0
@@ -15,7 +13,22 @@ run_test() {
   printf "  - %-65s " "$name"
   local log_file
   log_file=$(mktemp)
-  if "$@" >"$log_file" 2>&1; then
+  # errexit must be active inside the test; `if`/`||` contexts would disable it and only the last command would count
+  set +e
+  (
+    set -e
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    cd "$dir"
+    export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+    export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+    git init -q .
+    git -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m init
+    "$@"
+  ) >"$log_file" 2>&1
+  local status=$?
+  set -e
+  if [ "$status" -eq 0 ]; then
     echo "[OK]"
     PASSED=$((PASSED + 1))
   else
@@ -23,44 +36,48 @@ run_test() {
     cat "$log_file"
     FAILED=$((FAILED + 1))
   fi
-  rm -rf .ralph "$log_file"
+  rm -f "$log_file"
 }
 
 test_setup_and_defaults() {
-  ./scripts/setup-ralph-loop.sh "CI test task" --completion-promise "CI_DONE"
+  "$ROOT/scripts/setup-ralph-loop.sh" "CI test task" --completion-promise "CI_DONE"
   test -f .ralph/state.env
   test -f .ralph/fix_plan.md
   grep -q "ITERATION=1" .ralph/state.env
   grep -q "MAX_ITERATIONS=10" .ralph/state.env
   grep -q "COMPLETION_PROMISE=CI_DONE" .ralph/state.env
   grep -q "INITIAL_TASK_COUNT=3" .ralph/state.env
+  test "$(ls -l .ralph/state.env | cut -c1-10)" = "-rw-------"
   grep -q "Ralph Implementation Plan & State Scheduler" .ralph/fix_plan.md
   grep -q "Working Memory & Cross-Turn Learnings" .ralph/fix_plan.md
 }
 
 test_marketplace_manifests() {
-  test -f .agents/plugins/marketplace.json
-  test -f .claude-plugin/marketplace.json
-  test -f .claude-plugin/plugin.json
-  test -f .codex-plugin/plugin.json
-  jq -e '.name == "ralph-wiggum" and .plugins[0].name == "ralph-wiggum" and .plugins[0].source == "./"' .agents/plugins/marketplace.json >/dev/null
-  jq -e '.name == "ralph-wiggum" and .plugins[0].name == "ralph-wiggum" and .plugins[0].source == "./"' .claude-plugin/marketplace.json >/dev/null
+  test -f "$ROOT/.agents/plugins/marketplace.json"
+  test -f "$ROOT/.claude-plugin/marketplace.json"
+  test -f "$ROOT/.claude-plugin/plugin.json"
+  test -f "$ROOT/.codex-plugin/plugin.json"
+  jq -e '.name == "ralph-wiggum" and .plugins[0].name == "ralph-wiggum" and .plugins[0].source == "./"' "$ROOT/.agents/plugins/marketplace.json" >/dev/null
+  jq -e '.name == "ralph-wiggum" and .plugins[0].name == "ralph-wiggum" and .plugins[0].source == "./"' "$ROOT/.claude-plugin/marketplace.json" >/dev/null
 }
 
 test_double_init_guard() {
-  ./scripts/setup-ralph-loop.sh "Active task" --completion-promise "DONE"
-  set +e
-  ./scripts/setup-ralph-loop.sh "Second concurrent attempt" 2>/dev/null
-  local status=$?
-  set -e
-  test "$status" -ne 0
-  ./scripts/setup-ralph-loop.sh "Forced reinited task" --completion-promise "DONE" --force
+  "$ROOT/scripts/setup-ralph-loop.sh" "Active task" --completion-promise "DONE"
+  if "$ROOT/scripts/setup-ralph-loop.sh" "Second concurrent attempt" 2>/dev/null; then
+    return 1
+  fi
+  "$ROOT/scripts/setup-ralph-loop.sh" "Forced reinited task" --completion-promise "DONE" --force
+}
+
+test_no_relative_script_paths() {
+  if grep -rn '\./scripts/' "$ROOT/skills" "$ROOT/scripts"; then
+    return 1
+  fi
 }
 
 test_cli_feedback_propagation() {
-  local tmp_agent
-  tmp_agent=$(mktemp)
-  cat << 'EOF' > "$tmp_agent"
+  local agent="$PWD/agent.sh"
+  cat << 'EOF' > "$agent"
 #!/usr/bin/env bash
 PROMPT_ARG="$3"
 if ! echo "$PROMPT_ARG" | grep -q "Automated Verification Failed"; then
@@ -71,156 +88,477 @@ else
   echo "All fixed! <promise>CLI_FEEDBACK_DONE</promise>"
 fi
 EOF
-  chmod +x "$tmp_agent"
+  chmod +x "$agent"
 
-  ./scripts/setup-ralph-loop.sh "Test CLI feedback" --max-iterations 3 --completion-promise "CLI_FEEDBACK_DONE" --test-cmd "grep -q '\[x\]' .ralph/fix_plan.md" --force
-  AGENT_BIN="$tmp_agent" ./scripts/ralph-cli.sh .ralph/fix_plan.md
+  "$ROOT/scripts/setup-ralph-loop.sh" "Test CLI feedback" --max-iterations 3 --completion-promise "CLI_FEEDBACK_DONE" --test-cmd "! grep -q '^- \[ \]' .ralph/fix_plan.md" --force
+  AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" .ralph/fix_plan.md
   test ! -d .ralph
-  rm -f "$tmp_agent"
+}
+
+test_cli_max_iterations_fails() {
+  local agent="$PWD/agent.sh" out
+  printf '#!/usr/bin/env bash\necho "Mock agent turn without a promise"\n' > "$agent"
+  chmod +x "$agent"
+  "$ROOT/scripts/setup-ralph-loop.sh" "CLI max task" --max-iterations 1 --completion-promise "NEVER_EMITTED"
+  if out=$(AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" .ralph/fix_plan.md 2>&1); then
+    return 1
+  fi
+  grep -qF "Max iterations (1) reached" <<< "$out"
+  if grep -q "finished successfully" <<< "$out"; then
+    return 1
+  fi
 }
 
 test_claude_stop_hook() {
-  ./scripts/setup-ralph-loop.sh "Claude task" --completion-promise "CLAUDE_DONE"
+  "$ROOT/scripts/setup-ralph-loop.sh" "Claude task" --completion-promise "CLAUDE_DONE"
   local res
-  res=$(echo '{"last_assistant_message": "Working on steps..."}' | ./scripts/stop-hook.sh)
-  echo "$res" | grep -q '"decision": "block"'
+  res=$(echo '{"last_assistant_message": "Working on steps..."}' | "$ROOT/scripts/stop-hook.sh")
+  grep -q '"decision": "block"' <<< "$res"
   grep -q "ITERATION=2" .ralph/state.env
 
   perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
-  echo '{"last_assistant_message": "Finished! <promise>CLAUDE_DONE</promise>"}' | ./scripts/stop-hook.sh
+  echo '{"last_assistant_message": "Finished! <promise>CLAUDE_DONE</promise>"}' | "$ROOT/scripts/stop-hook.sh"
   test ! -d .ralph
 }
 
 test_nested_cwd_independence() {
-  ./scripts/setup-ralph-loop.sh "Nested CWD task" --max-iterations 3 --completion-promise "NESTED_DONE"
+  "$ROOT/scripts/setup-ralph-loop.sh" "Nested CWD task" --max-iterations 3 --completion-promise "NESTED_DONE"
   mkdir -p src/nested/dir
   (
     cd src/nested/dir
     local nested_out
-    nested_out=$(echo '{"last_assistant_message": "Working in nested dir"}' | "$SCRIPT_DIR/scripts/stop-hook.sh")
-    echo "$nested_out" | grep -q '"decision": "block"'
+    nested_out=$(echo '{"last_assistant_message": "Working in nested dir"}' | "$ROOT/scripts/stop-hook.sh")
+    grep -q '"decision": "block"' <<< "$nested_out"
   )
   test -f .ralph/state.env
   grep -q "ITERATION=2" .ralph/state.env
-  ./scripts/cancel-ralph.sh
+  "$ROOT/scripts/cancel-ralph.sh"
   rm -rf src/nested
 }
 
 test_single_iteration_max_completion() {
-  ./scripts/setup-ralph-loop.sh "Single turn task" --max-iterations 1 --completion-promise "SINGLE_DONE" --test-cmd "true"
+  "$ROOT/scripts/setup-ralph-loop.sh" "Single turn task" --max-iterations 1 --completion-promise "SINGLE_DONE" --test-cmd "true"
   perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
-  echo '{"last_assistant_message": "Done on turn 1! <promise>SINGLE_DONE</promise>"}' | ./scripts/stop-hook.sh
+  echo '{"last_assistant_message": "Done on turn 1! <promise>SINGLE_DONE</promise>"}' | "$ROOT/scripts/stop-hook.sh"
   test ! -d .ralph
 }
 
 test_anti_cheating_and_plan_integrity() {
-  ./scripts/setup-ralph-loop.sh "Integrity test task" --max-iterations 3 --completion-promise "INTEGRITY_DONE"
+  "$ROOT/scripts/setup-ralph-loop.sh" "Integrity test task" --max-iterations 3 --completion-promise "INTEGRITY_DONE"
   cat <<EOF > .ralph/fix_plan.md
 # Plan
 - [x] Only 1 task
 EOF
   local ch_out
-  ch_out=$(echo '{"last_assistant_message": "Done! <promise>INTEGRITY_DONE</promise>"}' | ./scripts/stop-hook.sh)
-  echo "$ch_out" | grep -q "Plan Integrity Guard Alert"
+  ch_out=$(echo '{"last_assistant_message": "Done! <promise>INTEGRITY_DONE</promise>"}' | "$ROOT/scripts/stop-hook.sh")
+  grep -q "Plan Integrity Guard Alert" <<< "$ch_out"
   test -d .ralph
-  ./scripts/cancel-ralph.sh
+  "$ROOT/scripts/cancel-ralph.sh"
 }
 
 test_exact_literal_promise_matching() {
-  ./scripts/setup-ralph-loop.sh "Exact promise task" --max-iterations 3 --completion-promise "AUTH_V1.0"
-  echo '{"last_assistant_message": "False match <promise>AUTH_V100</promise>"}' | ./scripts/stop-hook.sh >/dev/null
+  "$ROOT/scripts/setup-ralph-loop.sh" "Exact promise task" --max-iterations 3 --completion-promise "AUTH_V1.0"
+  echo '{"last_assistant_message": "False match <promise>AUTH_V100</promise>"}' | "$ROOT/scripts/stop-hook.sh" >/dev/null
   test -d .ralph
   perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
-  echo '{"last_assistant_message": "Exact match <promise>AUTH_V1.0</promise>"}' | ./scripts/stop-hook.sh
+  echo '{"last_assistant_message": "Exact match <promise>AUTH_V1.0</promise>"}' | "$ROOT/scripts/stop-hook.sh"
   test ! -d .ralph
 }
 
 test_continuous_backpressure() {
-  ./scripts/setup-ralph-loop.sh "Backpressure task" --test-cmd "echo 'Running unit test suite'; exit 1"
+  "$ROOT/scripts/setup-ralph-loop.sh" "Backpressure task" --test-cmd "echo 'Running unit test suite'; exit 1"
   local fail_out
-  fail_out=$(echo '{"last_assistant_message": "Just wrote some code"}' | ./scripts/stop-hook.sh)
-  echo "$fail_out" | grep -q "Automated Verification Failed"
+  fail_out=$(echo '{"last_assistant_message": "Just wrote some code"}' | "$ROOT/scripts/stop-hook.sh")
+  grep -q "Automated Verification Failed" <<< "$fail_out"
   test -d .ralph
-  ./scripts/cancel-ralph.sh
+  "$ROOT/scripts/cancel-ralph.sh"
 }
 
 test_copilot_stop_hook() {
-  local tmp_copilot
-  tmp_copilot=$(mktemp)
-  echo '{"type":"message","text":"Completed in Copilot <promise>COPILOT_DONE</promise>"}' > "$tmp_copilot"
-  ./scripts/setup-ralph-loop.sh "Copilot task" --max-iterations 3 --completion-promise "COPILOT_DONE"
+  local transcript="$PWD/transcript.jsonl"
+  echo '{"type":"message","text":"Completed in Copilot <promise>COPILOT_DONE</promise>"}' > "$transcript"
+  "$ROOT/scripts/setup-ralph-loop.sh" "Copilot task" --max-iterations 3 --completion-promise "COPILOT_DONE"
   perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
   local copilot_out
-  copilot_out=$(echo "{\"TranscriptPath\": \"$tmp_copilot\", \"StopHookActive\": true}" | ./scripts/stop-hook.sh)
-  echo "$copilot_out" | grep -q '"decision": "allow"'
-  test ! -d .ralph
-  rm -f "$tmp_copilot"
+  copilot_out=$(echo "{\"TranscriptPath\": \"$transcript\", \"StopHookActive\": true}" | "$ROOT/scripts/stop-hook.sh")
+  # Promise in the transcript file is not the stop payload, so it must not complete the loop
+  grep -q '"decision": "block"' <<< "$copilot_out"
+  test -d .ralph
+  "$ROOT/scripts/cancel-ralph.sh"
 }
 
+# Host payload fields beyond last_assistant_message are unproven; only the max-iterations exit is checked
 test_cursor_stop_hook() {
-  ./scripts/setup-ralph-loop.sh "Cursor task" --max-iterations 3 --completion-promise "CURSOR_DONE"
-  perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
-  echo "## Completed Evidence: <promise>CURSOR_DONE</promise>" >> .ralph/fix_plan.md
+  "$ROOT/scripts/setup-ralph-loop.sh" "Cursor task" --max-iterations 1
   local cursor_out
-  cursor_out=$(echo '{"status": "completed", "loop_count": 2}' | ./scripts/stop-hook.sh)
-  echo "$cursor_out" | grep -q '"decision": "allow"'
+  cursor_out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh")
+  grep -q '"decision": "allow"' <<< "$cursor_out"
   test ! -d .ralph
 }
 
+# executionNum selects the Antigravity output contract; it is unproven outside this test
 test_antigravity_lifecycle_contract() {
-  local tmp_transcript
-  tmp_transcript=$(mktemp)
-  echo '{"type":"PLANNER_RESPONSE","content":"In progress"}' >> "$tmp_transcript"
-  ./scripts/setup-ralph-loop.sh "Antigravity task" --max-iterations 3 --completion-promise "AGY_TEST_DONE"
-  local agy_res
-  agy_res=$(echo "{\"executionNum\": 1, \"transcriptPath\": \"$tmp_transcript\", \"terminationReason\": \"model_stop\"}" | ./scripts/stop-hook.sh)
-  echo "$agy_res" | grep -q '"decision": "continue"'
-  grep -q "ITERATION=2" .ralph/state.env
-
-  perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
-  echo '{"type":"PLANNER_RESPONSE","content":"All green! <promise>AGY_TEST_DONE</promise>"}' >> "$tmp_transcript"
+  "$ROOT/scripts/setup-ralph-loop.sh" "Antigravity task" --max-iterations 1
   local agy_stop
-  agy_stop=$(echo "{\"executionNum\": 2, \"transcriptPath\": \"$tmp_transcript\", \"terminationReason\": \"model_stop\"}" | ./scripts/stop-hook.sh)
-  echo "$agy_stop" | grep -q '"decision": "stop"'
+  agy_stop=$(echo '{"executionNum": 1, "last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh")
+  grep -q '"decision": "stop"' <<< "$agy_stop"
   test ! -d .ralph
-  rm -f "$tmp_transcript"
+}
+
+test_promise_only_in_plan_does_not_complete() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Plan promise task" --max-iterations 3 --completion-promise "PLAN_ONLY"
+  perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
+  echo "<promise>PLAN_ONLY</promise>" >> .ralph/fix_plan.md
+  echo '{"last_assistant_message": "Still working on it"}' | "$ROOT/scripts/stop-hook.sh" >/dev/null
+  test -d .ralph
+  "$ROOT/scripts/cancel-ralph.sh"
+}
+
+test_zero_checkbox_plan_integrity() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Empty plan task" --max-iterations 3 --completion-promise "EMPTY_PLAN"
+  printf '# Plan\nNo checkboxes left\n' > .ralph/fix_plan.md
+  sed -i.bak 's/^INITIAL_TASK_COUNT=.*/INITIAL_TASK_COUNT=1/' .ralph/state.env
+  local err_file hook_out
+  err_file=$(mktemp)
+  hook_out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh" 2>"$err_file")
+  grep -q "Plan Integrity Guard Alert" <<< "$hook_out"
+  test ! -s "$err_file"
+  rm -f "$err_file"
+  "$ROOT/scripts/cancel-ralph.sh"
+}
+
+test_deleted_test_integrity_guard() {
+  mkdir tests
+  echo 'exit 0' > tests/foo.sh
+  echo 'export const inspector = 1;' > inspector.ts
+  git add . && git -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm "tests"
+  "$ROOT/scripts/setup-ralph-loop.sh" "Deleted test task" --max-iterations 3 --completion-promise "DEL_DONE" >/dev/null
+
+  rm inspector.ts
+  local out
+  out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh")
+  grep -q '"decision": "block"' <<< "$out"
+  if grep -q "Test Integrity Guard Alert" <<< "$out"; then
+    return 1
+  fi
+
+  rm tests/foo.sh
+  out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh")
+  grep -q "Test Integrity Guard Alert" <<< "$out"
 }
 
 test_security_and_injection_resistance() {
-  set +e
-  ./scripts/setup-ralph-loop.sh task --max-iterations '$(touch /tmp/bad_marker)' 2>/dev/null
-  local inj_status=$?
-  set -e
-  test "$inj_status" -ne 0
-  test ! -f /tmp/bad_marker
+  local marker="$PWD/bad_marker"
+  if "$ROOT/scripts/setup-ralph-loop.sh" task --max-iterations "\$(touch $marker)" 2>/dev/null; then
+    return 1
+  fi
+  test ! -f "$marker"
+}
+
+test_prompt_file_preserves_text_literally() {
+  local marker="$PWD/marker"
+  printf '%s\n' "Fix the user's \"login\" \\ path" "Injected \$(touch $marker) \`touch $marker\`" "RALPH_ARGS_EOF" > PROMPT.md
+  git add PROMPT.md && git commit -qm "prompt"
+  "$ROOT/scripts/setup-ralph-loop.sh" --prompt-file PROMPT.md --max-iterations 3
+  test -f PROMPT.md
+  test -z "$(git status --porcelain)"
+  test ! -e "$marker"
+  grep -qF "Fix the user's \"login\" \\ path" .ralph/fix_plan.md
+  grep -qF "Injected \$(touch $marker) \`touch $marker\`" .ralph/fix_plan.md
+  grep -qx "RALPH_ARGS_EOF" .ralph/fix_plan.md
+}
+
+test_prompt_file_empty_is_rejected() {
+  : > prompt.md
+  if "$ROOT/scripts/setup-ralph-loop.sh" --prompt-file prompt.md; then
+    return 1
+  fi
+  test ! -f .ralph/state.env
+}
+
+test_prompt_file_missing_is_rejected() {
+  if "$ROOT/scripts/setup-ralph-loop.sh" --prompt-file missing.md; then
+    return 1
+  fi
+}
+
+test_prompt_and_prompt_file_are_exclusive() {
+  echo "task" > prompt.md
+  if "$ROOT/scripts/setup-ralph-loop.sh" "inline task" --prompt-file prompt.md; then
+    return 1
+  fi
+  test -f prompt.md
 }
 
 test_complex_quotes_and_arg_unpacking() {
-  ./scripts/setup-ralph-loop.sh 'Implement feature and don'\''t break existing tests --max-iterations 5 --completion-promise "PROMISE_TEST"'
+  "$ROOT/scripts/setup-ralph-loop.sh" --completion-promise 'AUTH_DONE' --test-cmd 'npm test' fix bug
   test -f .ralph/state.env
-  grep -q "MAX_ITERATIONS=5" .ralph/state.env
+  grep -q "COMPLETION_PROMISE=AUTH_DONE" .ralph/state.env
+  grep -q "TEST_COMMAND=npm test" .ralph/state.env
+  grep -q "Specification & Objective" .ralph/fix_plan.md
+  grep -q "^fix bug$" .ralph/fix_plan.md
   local cancel_out
-  cancel_out=$(./scripts/cancel-ralph.sh)
-  echo "$cancel_out" | grep -q "Ralph loop canceled at iteration 1"
+  cancel_out=$("$ROOT/scripts/cancel-ralph.sh")
+  grep -q "Ralph loop canceled at iteration 1" <<< "$cancel_out"
   test ! -d .ralph
+}
+
+test_setup_requires_git_commit() {
+  local plain
+  plain=$(mktemp -d)
+  if (cd "$plain" && "$ROOT/scripts/setup-ralph-loop.sh" "Outside git" 2>/dev/null); then
+    return 1
+  fi
+  git -C "$plain" init -q
+  if (cd "$plain" && "$ROOT/scripts/setup-ralph-loop.sh" "No commit yet" 2>/dev/null); then
+    return 1
+  fi
+  rm -rf "$plain"
+}
+
+test_tracked_state_refused() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Tracked task" --completion-promise "TRACKED"
+  git add -f .ralph
+  git -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm "track state"
+  if "$ROOT/scripts/setup-ralph-loop.sh" "Replacement" --completion-promise "TRACKED" --force 2>/dev/null; then
+    return 1
+  fi
+  local out
+  out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh")
+  test -z "$out"
+  grep -q "ITERATION=1" .ralph/state.env
+}
+
+test_multiline_flags_rejected() {
+  if "$ROOT/scripts/setup-ralph-loop.sh" "Multiline task" --test-cmd $'true\nfalse' 2>/dev/null; then
+    return 1
+  fi
+  if "$ROOT/scripts/setup-ralph-loop.sh" "Multiline task" --completion-promise $'DONE\nX' 2>/dev/null; then
+    return 1
+  fi
+  test ! -f .ralph/state.env
+}
+
+test_baseline_commit_recorded() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Baseline task"
+  grep -qF "BASE_COMMIT=$(git rev-parse HEAD)" .ralph/state.env
+}
+
+test_missing_plan_alert() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Missing plan task" --completion-promise "GONE"
+  rm .ralph/fix_plan.md
+  local out
+  out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh")
+  grep -q "Plan Integrity Guard Alert" <<< "$out"
+}
+
+test_promise_only_from_last_message() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Field task" --max-iterations 3 --completion-promise "FIELD_DONE"
+  perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
+  local out
+  out=$(echo '{"transcript": "<promise>FIELD_DONE</promise>", "last_assistant_message": "still going"}' | "$ROOT/scripts/stop-hook.sh")
+  jq -e '.decision == "block"' <<< "$out" >/dev/null
+  test -d .ralph
+}
+
+test_feedback_with_control_characters_is_valid_json() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Escape task" --max-iterations 3 --test-cmd "printf '\033[31mred\033[0m \"q\"\n'; exit 1"
+  local out
+  out=$(echo '{"last_assistant_message": "working"}' | "$ROOT/scripts/stop-hook.sh")
+  jq -e '.decision == "block" and (.reason | contains("red") and contains("\"q\""))' <<< "$out" >/dev/null
+}
+
+test_malformed_stdin_does_not_crash() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Malformed task" --max-iterations 3
+  local out
+  out=$(echo 'not json' | "$ROOT/scripts/stop-hook.sh")
+  jq -e '.decision == "block"' <<< "$out" >/dev/null
+}
+
+test_cli_agent_deleting_state_is_not_success() {
+  local agent="$PWD/agent.sh" out
+  printf '#!/usr/bin/env bash\nrm -rf .ralph\necho "Mock agent removed state"\n' > "$agent"
+  chmod +x "$agent"
+  "$ROOT/scripts/setup-ralph-loop.sh" "CLI delete task" --max-iterations 3 --completion-promise "NEVER_EMITTED"
+  if out=$(AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" .ralph/fix_plan.md 2>&1); then
+    return 1
+  fi
+  grep -qF "state removed without verification" <<< "$out"
+  if grep -q "finished successfully" <<< "$out"; then
+    return 1
+  fi
+}
+
+test_cli_no_advance_stops_after_one_agent_call() {
+  local agent="$PWD/agent.sh" calls="$PWD/calls" out="$PWD/cli.log" pid watchdog status=0
+  printf '#!/usr/bin/env bash\necho x >> "%s"\necho "Mock agent turn"\n' "$calls" > "$agent"
+  chmod +x "$agent"
+  "$ROOT/scripts/setup-ralph-loop.sh" "CLI refused task" --max-iterations 3 --completion-promise "NEVER_EMITTED"
+  git add -f .ralph/state.env && git commit -q -m "track state"
+  # own process group: bash defers the CLI's TERM trap until the hung agent exits, so the agent must die too
+  set -m
+  AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" .ralph/fix_plan.md >"$out" 2>&1 &
+  pid=$!
+  set +m
+  (sleep 30; kill -- -"$pid" 2>/dev/null) &
+  watchdog=$!
+  wait "$pid" || status=$?
+  kill "$watchdog" 2>/dev/null || true
+  test "$status" -ne 0
+  grep -qF "did not advance" "$out"
+  test "$(wc -l < "$calls")" -le 2
+  test ! -e .ralph/cli.pid
+}
+
+test_plugin_hook_gated_while_cli_runs() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Gated task" --max-iterations 3
+  echo "$$" > .ralph/cli.pid
+  local out
+  out=$(echo '{"last_assistant_message": "working"}' | "$ROOT/scripts/stop-hook.sh")
+  test -z "$out"
+  grep -q "^ITERATION=1$" .ralph/state.env
+}
+
+test_state_dir_is_excluded_from_git() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Excluded task" --max-iterations 3 --completion-promise "EXCL_DONE"
+  echo code > app.txt
+  git add -A && git commit -qm "work"
+  test -z "$(git ls-files .ralph)"
+  local out
+  out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh")
+  grep -q '"decision": "block"' <<< "$out"
+  grep -q "^ITERATION=2$" .ralph/state.env
+}
+
+test_hook_is_silent_outside_git() {
+  local plain err out
+  plain="$(mktemp -d)"
+  err="$(mktemp)"
+  out=$(echo "{\"cwd\": \"$plain\"}" | "$ROOT/scripts/stop-hook.sh" 2>"$err")
+  out+=$(echo '{"cwd": "/nonexistent-ralph-dir"}' | "$ROOT/scripts/stop-hook.sh" 2>>"$err")
+  rm -rf "$plain" "$err"
+  test -z "$out"
+  test ! -s "$err"
+}
+
+test_missing_jq_fails_before_advancing() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Jq task" --max-iterations 3
+  local bin="$PWD/bin" out status=0
+  mkdir "$bin"
+  ln -s "$(command -v git)" "$bin/git"
+  ln -s "$(command -v cat)" "$bin/cat"
+  out=$(echo '{"last_assistant_message": "Working"}' | PATH="$bin" "$(command -v bash)" "$ROOT/scripts/stop-hook.sh" 2>&1) || status=$?
+  test "$status" -ne 0
+  grep -q "jq is required" <<< "$out"
+  grep -q "^ITERATION=1$" .ralph/state.env
+}
+
+test_committed_test_deletion_is_caught() {
+  mkdir tests
+  echo 'exit 0' > tests/foo.sh
+  git add . && git commit -qm "tests"
+  "$ROOT/scripts/setup-ralph-loop.sh" "Committed deletion" --max-iterations 3 >/dev/null
+  git rm -q tests/foo.sh && git commit -qm "delete test"
+  local out
+  out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh")
+  grep -q "Test Integrity Guard Alert" <<< "$out"
+}
+
+test_test_directory_variants_are_guarded() {
+  mkdir __tests__
+  echo 'x' > __tests__/a.js
+  echo 'def test_x(): pass' > test_x.py
+  git add . && git commit -qm "tests"
+  "$ROOT/scripts/setup-ralph-loop.sh" "Variant task" --max-iterations 3 >/dev/null
+  rm -r __tests__ test_x.py
+  local out
+  out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh")
+  grep -q "Test Integrity Guard Alert" <<< "$out"
+}
+
+test_force_clears_stale_cli_pid() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Force task" --max-iterations 3
+  echo "$$" > .ralph/cli.pid
+  "$ROOT/scripts/setup-ralph-loop.sh" "Force task" --max-iterations 3 --force >/dev/null
+  test ! -e .ralph/cli.pid
+}
+
+test_setup_excludes_state_before_requiring_commit() {
+  rm -rf .git && git init -q .
+  local out
+  if out=$("$ROOT/scripts/setup-ralph-loop.sh" "No commit task" 2>&1); then
+    return 1
+  fi
+  grep -qF "needs a commit" <<< "$out"
+  mkdir .ralph && echo x > .ralph/fix_plan.md
+  test -z "$(git status --porcelain)"
+}
+
+test_exclude_append_handles_missing_trailing_newline() {
+  printf 'node_modules' > .git/info/exclude
+  "$ROOT/scripts/setup-ralph-loop.sh" "Newline task" --max-iterations 3 >/dev/null
+  "$ROOT/scripts/setup-ralph-loop.sh" "Newline task" --max-iterations 3 --force >/dev/null
+  grep -qxF 'node_modules' .git/info/exclude
+  test "$(grep -cxF '.ralph/' .git/info/exclude)" -eq 1
+}
+
+test_diff_failure_blocks_verification() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Diff failure task" --max-iterations 3 --completion-promise "DIFF_DONE" >/dev/null
+  sed 's/^BASE_COMMIT=.*/BASE_COMMIT=deadbeef/' .ralph/state.env > state.tmp && mv state.tmp .ralph/state.env
+  sed 's/- \[ \]/- [x]/' .ralph/fix_plan.md > plan.tmp && mv plan.tmp .ralph/fix_plan.md
+  local out
+  out=$(echo '{"last_assistant_message": "<promise>DIFF_DONE</promise>"}' | "$ROOT/scripts/stop-hook.sh" 2>&1)
+  grep -q '"decision": "block"' <<< "$out"
+  if grep -q "Ralph loop: Verified" <<< "$out"; then
+    return 1
+  fi
 }
 
 echo "=== Running Ralph Wiggum Test Suite ==="
 run_test "Setup & Default State Configuration" test_setup_and_defaults
 run_test "Codex & Claude Marketplace Manifest Conformance" test_marketplace_manifests
+run_test "No Relative ./scripts/ Paths in Skills or Scripts" test_no_relative_script_paths
 run_test "Double Initialization Guard & --force Override" test_double_init_guard
 run_test "Headless CLI Self-Correcting Feedback Propagation" test_cli_feedback_propagation
+run_test "Headless CLI Max Iterations Exits Non-Zero" test_cli_max_iterations_fails
 run_test "Claude Code Stop Hook Lifecycle & Iterations" test_claude_stop_hook
 run_test "Nested CWD & Worktree Independence" test_nested_cwd_independence
 run_test "Single-Iteration Max Completion Gate (Off-by-One Guard)" test_single_iteration_max_completion
 run_test "Anti-Cheating & Plan Integrity Guard" test_anti_cheating_and_plan_integrity
+run_test "Zero-Checkbox Plan Integrity Guard (No Bash Error)" test_zero_checkbox_plan_integrity
+run_test "Deleted Test File Guard Ignores Non-Test Names" test_deleted_test_integrity_guard
+run_test "Promise Only In Plan Does Not Complete" test_promise_only_in_plan_does_not_complete
 run_test "Exact Literal Promise Matching (Awk Parser)" test_exact_literal_promise_matching
 run_test "Continuous Per-Turn Hard Backpressure (--test-cmd)" test_continuous_backpressure
 run_test "GitHub Copilot Stop Hook with TranscriptPath" test_copilot_stop_hook
-run_test "Cursor Stop Hook with Living Fix Plan Resolution" test_cursor_stop_hook
-run_test "Google Antigravity Native Lifecycle Hook Contract" test_antigravity_lifecycle_contract
+run_test "Cursor Stop Hook Max Iterations Only (Unverified Host)" test_cursor_stop_hook
+run_test "Antigravity Stop Hook Max Iterations Only (Unverified Host)" test_antigravity_lifecycle_contract
 run_test "Security & Shell Injection Resistance" test_security_and_injection_resistance
-run_test "Complex Quotes, Contractions & Single-String Unpacking" test_complex_quotes_and_arg_unpacking
+run_test "Complex Quotes & Flag Argument Unpacking" test_complex_quotes_and_arg_unpacking
+run_test "Prompt File Preserves Text Literally" test_prompt_file_preserves_text_literally
+run_test "Empty Prompt File Is Rejected" test_prompt_file_empty_is_rejected
+run_test "Missing Prompt File Is Rejected" test_prompt_file_missing_is_rejected
+run_test "Prompt And Prompt File Are Exclusive" test_prompt_and_prompt_file_are_exclusive
+run_test "Setup Requires A Git Commit" test_setup_requires_git_commit
+run_test "Tracked .ralph State Is Refused" test_tracked_state_refused
+run_test "Multi-Line Flag Values Are Rejected" test_multiline_flags_rejected
+run_test "Baseline Commit Recorded In State" test_baseline_commit_recorded
+run_test "Promise Outside Last Message Does Not Complete" test_promise_only_from_last_message
+run_test "Feedback With Control Characters Is Valid JSON" test_feedback_with_control_characters_is_valid_json
+run_test "Malformed Stdin Does Not Crash Hook" test_malformed_stdin_does_not_crash
+run_test "CLI Agent Deleting State Is Not Success" test_cli_agent_deleting_state_is_not_success
+run_test "CLI Stops When Hook Does Not Advance" test_cli_no_advance_stops_after_one_agent_call
+run_test "Plugin Hook Gated While CLI Runs" test_plugin_hook_gated_while_cli_runs
+run_test "Missing Plan File Raises Integrity Alert" test_missing_plan_alert
+run_test "State Dir Excluded From git add -A" test_state_dir_is_excluded_from_git
+run_test "Stop Hook Silent Outside Git Or Bad cwd" test_hook_is_silent_outside_git
+run_test "Missing jq Fails Before Advancing" test_missing_jq_fails_before_advancing
+run_test "Committed Test Deletion Is Caught" test_committed_test_deletion_is_caught
+run_test "Test Directory Variants Are Guarded" test_test_directory_variants_are_guarded
+run_test "setup --force Clears Stale cli.pid" test_force_clears_stale_cli_pid
+run_test "Setup Excludes State Before Requiring A Commit" test_setup_excludes_state_before_requiring_commit
+run_test "Exclude Append Handles Missing Trailing Newline" test_exclude_append_handles_missing_trailing_newline
+run_test "Baseline Diff Failure Blocks Verification" test_diff_failure_blocks_verification
 
 echo "---------------------------------------------------------------"
 echo "Results: $PASSED passed, $FAILED failed."
