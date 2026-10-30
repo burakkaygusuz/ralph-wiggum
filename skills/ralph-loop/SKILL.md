@@ -11,7 +11,7 @@ description: Run an autonomous, iterative development loop using the Ralph Wiggu
 
 - `PROMPT` (required): Task description, architecture requirements, and acceptance criteria.
 - `--max-iterations <N>` (optional, default: 10): Safety ceiling on turns (0 for unbounded).
-- `--completion-promise '<TEXT>'` (optional): Exact string in `<promise>TEXT</promise>` required to stop.
+- `--completion-promise '<TEXT>'` (optional): Exact string in `<promise>TEXT</promise>` required to stop. Without it, `<promise>COMPLETE</promise>` or `<promise>DONE</promise>` is accepted. Setup rejects TEXT containing `<` or `\`, or with leading/trailing whitespace, because the stop hook could never match it.
 - `--test-cmd '<CMD>'` (optional): Command executed deterministically by stop hook before accepting completion.
 - `--force` (optional): Override an existing active Ralph loop state.
 
@@ -23,6 +23,7 @@ description: Run an autonomous, iterative development loop using the Ralph Wiggu
    ${CLAUDE_PLUGIN_ROOT}/scripts/setup-ralph-loop.sh --prompt-file .ralph/prompt.md [--max-iterations N] [--completion-promise TEXT] [--test-cmd CMD] [--force]
    ```
    Setup writes `.ralph/` to `.git/info/exclude` and does not touch `.gitignore`.
+   The loop binds to the first session that stops after setup. Stops from other sessions are ignored, with a stderr notice (logged by the hook; the host may not show it in the chat), until setup is re-run with `--force` or the loop is cancelled. A new session after `/clear` may be ignored the same way if the host issues a new session id (not verified).
 
 2. **Iterate & Self-Correct (Huntley 1-Item Discipline):**
    On each turn:
@@ -33,12 +34,12 @@ description: Run an autonomous, iterative development loop using the Ralph Wiggu
    - Update `Working Memory` with new insights and mark the item `[x]` with test evidence in `.ralph/fix_plan.md`.
 
 3. **Terminate:**
-   - Output `<promise>TEXT</promise>` in your final reply **ONLY** when all work items and test criteria are completely verified. Do not write it to `.ralph/fix_plan.md`: the stop hook reads only your last message.
+   - Output `<promise>TEXT</promise>` in your final reply **ONLY** when all work items and test criteria are completely verified. Writing it in `.ralph/fix_plan.md` does not count: the stop hook reads only your last message.
    - Stop and summarize remaining blockers when max iterations is reached.
 
 ## Gotchas
 
-- **Headless Runner:** For long unattended runs, use `${CLAUDE_PLUGIN_ROOT}/scripts/ralph-cli.sh`. It exits non-zero when max iterations is reached without a verified promise.
+- **Headless Runner:** For long unattended runs, use `${CLAUDE_PLUGIN_ROOT}/scripts/ralph-cli.sh`. It exits non-zero when max iterations is reached without a verified promise. It runs `$AGENT_BIN --print -p` (default `AGENT_BIN=claude`), so the flags are Claude Code syntax.
 - **Test Integrity:** NEVER alter, mock out, or delete existing test assertions to force a passing build. Fix application code. The stop hook detects deleted test files only; weakened assertions are not detected, so a passing `--test-cmd` is the backstop.
 - **Promise Integrity:** Never emit `<promise>...</promise>` early or to escape the loop. If `--test-cmd` fails, the stop hook will block exit.
 - **Trust Model:** `--test-cmd` is user-authored and the stop hook executes it unprompted on every stop. `.ralph/state.env` is written with owner-only permissions (umask 077), and the hook refuses a state file not owned by the current user or tracked by git. Only pass commands you would run yourself.
