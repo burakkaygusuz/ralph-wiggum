@@ -32,27 +32,28 @@ jobs:
           noNewCommitBehavior: silent
           noVersionBumpBehavior: silent
 
-      - name: Update plugin.json Version
+      - name: Update Plugin Manifest Versions
         if: steps.semver.outputs.nextStrict != '' && steps.semver.outputs.bump != 'none'
         env:
           NEXT_VERSION: ${{ steps.semver.outputs.nextStrict }}
         run: |
           python3 -c "
-          import os, json, pathlib
-          p = pathlib.Path('plugin.json')
-          data = json.loads(p.read_text(encoding='utf-8'))
-          data['version'] = os.environ['NEXT_VERSION']
-          p.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
-          "
+          import os, json, pathlib, sys
+          for name in sys.argv[1:]:
+              p = pathlib.Path(name)
+              data = json.loads(p.read_text(encoding='utf-8'))
+              data['version'] = os.environ['NEXT_VERSION']
+              p.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
+          " plugin.json .claude-plugin/plugin.json .codex-plugin/plugin.json
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add plugin.json
-          git diff-index --quiet HEAD || git commit -m "chore(release): bump version to ${{ steps.semver.outputs.nextStrict }} [skip ci]"
+          git add plugin.json .claude-plugin/plugin.json .codex-plugin/plugin.json
+          git diff-index --quiet HEAD || git commit -m "chore(release): bump version to $NEXT_VERSION [skip ci]"
           git push origin main
 
       - name: Publish GitHub Release & Tag
         if: steps.semver.outputs.next != '' && steps.semver.outputs.bump != 'none'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.semver.outputs.next }}
           name: Release ${{ steps.semver.outputs.next }}
