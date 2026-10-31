@@ -251,6 +251,11 @@ test_moved_test_file_is_not_a_deletion() {
   git mv tests/unit/a.test.js notes.txt
   out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh")
   grep -q "Test Integrity Guard Alert" <<< "$out"
+  git mv notes.txt tests/unit/a.test.js
+  mkdir tests/off
+  git mv tests/unit/a.test.js tests/off/a.test.js.disabled
+  out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh")
+  grep -q "Test Integrity Guard Alert" <<< "$out"
 }
 
 test_concurrent_hooks_are_serialized() {
