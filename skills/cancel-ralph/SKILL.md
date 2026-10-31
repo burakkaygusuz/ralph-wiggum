@@ -9,7 +9,10 @@ Aborts any active Ralph loop and cleans up workspace state.
 
 ## Execution
 
+If `${CLAUDE_PLUGIN_ROOT}` has no value, use the folder two levels above this SKILL.md file instead. That folder contains `scripts/`.
+
 Run the cancellation script:
+
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/cancel-ralph.sh
 ```

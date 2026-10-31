@@ -10,8 +10,9 @@ Initialize the Ralph loop.
 
 1. Write the task text from `$ARGUMENTS` (everything except `--max-iterations`, `--completion-promise`, `--test-cmd` and `--force` with their values) verbatim to `.ralph/prompt.md`.
 2. Run `"${CLAUDE_PLUGIN_ROOT}/scripts/setup-ralph-loop.sh" --prompt-file .ralph/prompt.md` followed by any `--max-iterations`, `--completion-promise`, `--test-cmd` and `--force` flags from `$ARGUMENTS`.
-Read `.ralph/fix_plan.md` and begin executing Step 1 from the Work Queue.
+3. Read `.ralph/fix_plan.md`.
+4. Start item 1 in the work queue.
 
-When you finish each turn, the Ralph stop hook will evaluate your verification status and feed progress or test feedback back to you for the next iteration until completion or max iterations.
+When you finish a turn, the stop hook checks your work. It sends you the plan and test feedback for the next iteration. This repeats until the work is complete or the iteration limit is reached.
 
-CRITICAL RULE: If a completion promise is set, you may ONLY output `<promise>TEXT</promise>` when the statement is completely and unequivocally true.
+VERY IMPORTANT: Write `<promise>TEXT</promise>` only when all work items are completed and the tests pass. TEXT is the completion promise. If the user did not set it, use `COMPLETE`.
