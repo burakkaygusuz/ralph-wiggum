@@ -91,7 +91,7 @@ No stop hook ships for other clients. Use `ralph-cli.sh` for unattended runs (se
 
 ## How to Use Across All Agents
 
-Ralph Loop can be invoked via **Slash Commands** (Claude Code), **Natural Language Prompts** (Cursor, Antigravity, Codex, Copilot), or **Headless CLI**.
+Ralph Loop can be invoked via **Slash Commands** (Claude Code; other hosts list the skills as slash forms, see "How to Cancel an Active Loop"), **Natural Language Prompts** (Cursor, Antigravity, Codex, Copilot), or **Headless CLI**.
 
 ### Scenario 1: Test-Driven Development (TDD with Hard Backpressure)
 
@@ -159,9 +159,13 @@ For unbounded overnight tasks beyond chat host continuation limits:
 
 ### How to Cancel an Active Loop
 
-- **Claude Code:** `/cancel-ralph`
-- **Cursor / Antigravity / Codex / Copilot (Chat):** `Cancel active ralph loop` or `Stop ralph loop`
+- **Claude Code, Grok Build, Cursor, Antigravity:** `/cancel-ralph`
+- **Codex:** `$cancel-ralph`
+- **Copilot (VS Code):** `/ralph-wiggum:cancel-ralph`
+- **Any chat:** `Cancel active ralph loop` or `Stop ralph loop`. The `cancel-ralph` skill runs the script.
 - **Terminal / CLI:** `<plugin-dir>/scripts/cancel-ralph.sh` or `Ctrl+C`
+
+Only Claude Code is verified. The other forms follow the host docs and were not run live.
 
 ---
 
