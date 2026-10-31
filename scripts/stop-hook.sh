@@ -143,7 +143,13 @@ TEST_PATH_RE='(^|/)(tests?|__tests__|specs?)/|(^|/)test_[^/]*\.py$|[._](test|spe
 if [[ ! "$BASE_COMMIT" =~ ^[0-9a-f]{7,64}$ ]] || ! DELETED_FILES="$(git -c core.quotePath=false diff -M --name-status --diff-filter=DR "$BASE_COMMIT" --)"; then
   DELETED_TESTS="unknown (git diff against $BASE_COMMIT failed)"
 else
-  DELETED_TESTS="$(awk -F'\t' -v re="$TEST_PATH_RE" '$1 == "D" || ($1 ~ /^R/ && $3 !~ re) { print $2 }' <<< "$DELETED_FILES" | grep -E "$TEST_PATH_RE" || true)"
+  DELETED_TESTS=""
+  while IFS=$'\t' read -r status old new; do
+    [[ "$old" =~ $TEST_PATH_RE ]] || continue
+    [[ "$status" == R* && "$new" =~ $TEST_PATH_RE ]] && continue
+    DELETED_TESTS+="$old"$'\n'
+  done <<< "$DELETED_FILES"
+  DELETED_TESTS="${DELETED_TESTS%$'\n'}"
 fi
 if [[ -n "$DELETED_TESTS" ]]; then
   TEST_FEEDBACK+=$'\n\n'"[Test Integrity Guard Alert: Existing test files were deleted: $DELETED_TESTS. Revert deletions and fix application code.]"
