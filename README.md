@@ -60,6 +60,8 @@ codex plugin add ralph-wiggum@ralph-wiggum
 
 Install via the Cursor / VS Code Agent Plugins interface. Cursor stop payloads carry no assistant text, so no `<promise>` can be read there. The loop ends in one of two cases. First, `--test-cmd` passes, every plan item is checked, and no test file was deleted. Second, the iteration limit is reached.
 
+The plugin ships `.cursor-plugin/plugin.json` (hooks from `hooks/cursor-hooks.json`, rules and skills from their default folders). It follows the official Cursor plugin docs; it was not run on a live Cursor.
+
 ### Google Antigravity
 
 ```bash
