@@ -66,7 +66,7 @@ Install via the Cursor / VS Code Agent Plugins interface. Cursor stop payloads c
 agy plugin install https://github.com/burakkaygusuz/ralph-wiggum
 ```
 
-This follows the official Antigravity hook documentation; it was not run on a live `agy`. The root `hooks.json` runs the stop hook, and the hook answers `{"decision":"continue"}`. The Antigravity docs also show `"block"` for plugin hooks; if the loop does not continue, change `continue` in `scripts/stop-hook.sh`. Stop payloads carry no assistant text, so no `<promise>` can be read. The loop ends in the same two cases as on Cursor. The hook skips stops that are not `model_stop` or that have `fullyIdle` false.
+This follows the official Antigravity hook documentation; it was not run on a live `agy`. The root `hooks.json` runs the stop hook, and the hook answers `{"decision":"continue"}`. The Antigravity docs also show `"block"` for plugin hooks; if the loop does not continue, change `continue` in `scripts/stop-hook.sh`. Stop payloads carry no assistant text, so no `<promise>` can be read. The loop ends in the same two cases as on Cursor. The hook skips stops that carry an `error` or that have `fullyIdle` false.
 
 ### Other Clients
 

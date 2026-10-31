@@ -430,17 +430,17 @@ test_antigravity_payload() {
   perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
   local repo="$PWD" elsewhere out
   elsewhere="$(mktemp -d)"
-  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"error\", \"fullyIdle\": true, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
+  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"ERROR\", \"error\": \"boom\", \"fullyIdle\": true, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
   test -z "$out"
-  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"model_stop\", \"fullyIdle\": false, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
+  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"NO_TOOL_CALL\", \"error\": \"\", \"fullyIdle\": false, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
   test -z "$out"
   grep -q "^ITERATION=1$" .ralph/state.env
   echo '- [ ] open item' >> .ralph/fix_plan.md
-  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"model_stop\", \"fullyIdle\": true, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
+  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"NO_TOOL_CALL\", \"error\": \"\", \"fullyIdle\": true, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
   jq -e '.decision == "continue" and (.reason | length > 0) and (has("followup_message") | not)' <<< "$out" >/dev/null
   grep -q "^SESSION_ID=.*c1" .ralph/state.env
   perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
-  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"model_stop\", \"fullyIdle\": true, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
+  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"NO_TOOL_CALL\", \"error\": \"\", \"fullyIdle\": true, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
   rm -rf "$elsewhere"
   jq -e '. == {}' <<< "$out" >/dev/null
   test ! -d .ralph
