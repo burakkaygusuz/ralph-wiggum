@@ -9,10 +9,10 @@ Ralph Wiggum is an autonomous development loop plugin for AI coding assistants, 
 - **Zero-Babysitting Autonomy:** The agent picks the next item from the plan, writes code, runs tests, and corrects itself. It needs no manual action in each turn.
 - **Minimal Dependencies:** Bash scripts with POSIX `sed` and `awk` for hook JSON. No Python, Node.js, Ruby, or pip/npm packages required.
 - **Living Backlog & Persistent Scheduler:** Tracks work items, acceptance criteria, and verified progress in `.ralph/fix_plan.md`.
-- **No More Half-Done Code:** The loop ends only when the agent outputs your completion promise (`<promise>COMPLETE</promise>`), the tests pass, and all work items are complete. (Cursor sends no assistant text, so there the tests, plan and guards decide.)
+- **No More Half-Done Code:** The loop ends only when the agent outputs your completion promise (`<promise>COMPLETE</promise>`), the tests pass, and all work items are complete. (Cursor and Antigravity send no assistant text, so there the tests, plan and guards decide.)
 - **Test Integrity Guard:** Deterministically verifies that existing test files are not deleted to bypass test backpressure.
 - **Git-Clean State:** Setup writes `.ralph/` to `.git/info/exclude` and does not touch `.gitignore`.
-- **Works Across All Agents:** Compatible with **Claude Code**, **Cursor**, **OpenAI Codex**, **Google Antigravity**, and **GitHub Copilot**. The `<promise>` is read only from the agent's last reply; this is verified on Claude Code only. Codex and Cursor use schema-compatible output but are unverified, and Antigravity and Copilot are unverified. This repo ships no Antigravity hook config, so the loop does not auto-continue there; use `ralph-cli.sh` for unattended runs.
+- **Works Across All Agents:** Compatible with **Claude Code**, **Grok Build**, **Cursor**, **OpenAI Codex**, **Google Antigravity**, and **GitHub Copilot**. The `<promise>` is read only from the agent's last reply; this is verified on Claude Code only. Codex, Cursor, Grok Build and Antigravity use schema-compatible output but are unverified, and Copilot is unverified.
 - **Safety First:** The default iteration limit (`--max-iterations 10`), continuous per-turn test verification (`--test-cmd`), and cancellation at any time (`/cancel-ralph` or `Ctrl+C`).
 
 ---
@@ -40,6 +40,15 @@ Ralph Wiggum conforms to the [Agent Plugins Specification (v1.0.0)](https://agen
 /plugin install ralph-wiggum
 ```
 
+### Grok Build
+
+```bash
+grok plugin marketplace add burakkaygusuz/ralph-wiggum
+grok plugin install ralph-wiggum --trust
+```
+
+This follows the official Grok Build hook documentation; it was not run on a live `grok`. Grok sends the last reply as `lastAssistantMessage`, and the stop hook reads that key. Grok ends a turn after 8 continuations. Send a new prompt to continue the loop. No stop hook is documented for other Grok products (grok.com, X, the xAI API).
+
 ### OpenAI Codex & ChatGPT
 
 ```bash
@@ -51,9 +60,17 @@ codex plugin add ralph-wiggum@ralph-wiggum
 
 Install via the Cursor / VS Code Agent Plugins interface. Cursor stop payloads carry no assistant text, so no `<promise>` can be read there. The loop ends in one of two cases. First, `--test-cmd` passes, every plan item is checked, and no test file was deleted. Second, the iteration limit is reached.
 
-### Other Clients (Antigravity, ...)
+### Google Antigravity
 
-No stop hook ships for Antigravity, so the loop does not continue on its own. Use `ralph-cli.sh` for unattended runs (see Scenario 4).
+```bash
+agy plugin install https://github.com/burakkaygusuz/ralph-wiggum
+```
+
+This follows the official Antigravity hook documentation; it was not run on a live `agy`. The root `hooks.json` runs the stop hook, and the hook answers `{"decision":"continue"}`. The Antigravity docs also show `"block"` for plugin hooks; if the loop does not continue, change `continue` in `scripts/stop-hook.sh`. Stop payloads carry no assistant text, so no `<promise>` can be read. The loop ends in the same two cases as on Cursor. The hook skips stops that are not `model_stop` or that have `fullyIdle` false.
+
+### Other Clients
+
+No stop hook ships for other clients. Use `ralph-cli.sh` for unattended runs (see Scenario 4).
 
 ---
 
@@ -134,7 +151,7 @@ For unbounded overnight tasks beyond chat host continuation limits:
 <plugin-dir>/scripts/ralph-cli.sh
 ```
 
-`ralph-cli.sh` runs `$AGENT_BIN --print -p <prompt>` each iteration. `AGENT_BIN` defaults to `claude`, so `--print -p` is Claude Code syntax; set `AGENT_BIN` to another binary only if it accepts the same flags. Do not run a plugin-enabled interactive session in the same repo while `ralph-cli.sh` runs.
+`ralph-cli.sh` runs `$AGENT_BIN -p <prompt>` each iteration. `AGENT_BIN` defaults to `claude`; set it to another binary (for example `grok`) only if it accepts the same flags. In headless mode, `grok` cancels tool calls that need permission, so set its permissions yourself. Do not run a plugin-enabled interactive session in the same repo while `ralph-cli.sh` runs.
 
 ---
 

@@ -42,7 +42,7 @@ If `${CLAUDE_PLUGIN_ROOT}` has no value, use the folder two levels above this SK
 
 ## Gotchas
 
-- **Headless Runner:** For long unattended runs, use `${CLAUDE_PLUGIN_ROOT}/scripts/ralph-cli.sh`. It exits non-zero when the iteration limit is reached without a verified promise. It runs `$AGENT_BIN --print -p` (default `AGENT_BIN=claude`). These flags are Claude Code syntax.
+- **Headless Runner:** For long unattended runs, use `${CLAUDE_PLUGIN_ROOT}/scripts/ralph-cli.sh`. It exits non-zero when the iteration limit is reached without a verified promise. It runs `$AGENT_BIN -p` (default `AGENT_BIN=claude`). Claude Code and Grok Build accept this flag.
 - **Test Integrity:** NEVER alter, mock out, or delete existing test assertions to force a passing build. Fix application code. The stop hook finds only deleted test files. It does not find changed assertions.
 - **Promise Integrity:** Never emit `<promise>...</promise>` early or to escape the loop. If `--test-cmd` fails, the stop hook blocks the exit.
 - **Trust Model:** The user writes the `--test-cmd` command. The stop hook runs this command after each turn. The hook does not ask for approval. Setup writes `.ralph/state.env` with owner-only permissions (umask 077). The hook rejects a state file that a different user owns or that git tracks. Use only commands that are safe for you to run.

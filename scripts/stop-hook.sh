@@ -9,6 +9,7 @@ RAW_INPUT="$(LC_ALL=C tr '\n' ' ' || true)"
 # shortcut: paths are not JSON-decoded, so a cwd containing a backslash or quote (Windows paths) will not resolve
 HOOK_DIR="$(printf '%s' "$RAW_INPUT" | json_raw cwd)"
 [[ -n "$HOOK_DIR" ]] || HOOK_DIR="$(printf '%s' "$RAW_INPUT" | json_raw workspace_roots)"
+[[ -n "$HOOK_DIR" ]] || HOOK_DIR="$(printf '%s' "$RAW_INPUT" | json_raw workspacePaths)"
 cd "${HOOK_DIR:-${CLAUDE_PROJECT_DIR:-.}}" 2>/dev/null || exit 0
 
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
@@ -67,13 +68,26 @@ fi
 
 read_state
 
+# Grok also fires Stop at session end (reason channel_closed or shutdown); no turn is left to continue.
+STOP_REASON="$(printf '%s' "$RAW_INPUT" | json_raw reason)"
+[[ -z "$STOP_REASON" || "$STOP_REASON" == "end_turn" ]] || exit 0
+
+# Antigravity stops for errors or step limits, and while background tasks still run (fullyIdle false); only model_stop is a finished turn.
+TERMINATION_REASON="$(printf '%s' "$RAW_INPUT" | json_raw terminationReason)"
+[[ -z "$TERMINATION_REASON" || "$TERMINATION_REASON" == "model_stop" ]] || exit 0
+[[ ! "$RAW_INPUT" =~ \"fullyIdle\"[[:space:]]*:[[:space:]]*false ]] || exit 0
+
 # Promises are matched on the raw JSON content, not a decoded copy: undo the escapes hosts apply to < > / and whitespace.
 # Go-style JSON encoders emit \u003c and \u003e. Setup rejects promises whose raw form differs from their text.
-LAST_MSG="$(printf '%s' "$RAW_INPUT" | json_raw last_assistant_message | LC_ALL=C sed 's/\\u003[cC]/</g;s/\\u003[eE]/>/g;s/\\\//\//g;s/\\[ntr]/ /g')"
+LAST_MSG_RAW="$(printf '%s' "$RAW_INPUT" | json_raw last_assistant_message)"
+[[ -n "$LAST_MSG_RAW" ]] || LAST_MSG_RAW="$(printf '%s' "$RAW_INPUT" | json_raw lastAssistantMessage)"
+LAST_MSG="$(printf '%s' "$LAST_MSG_RAW" | LC_ALL=C sed 's/\\u003[cC]/</g;s/\\u003[eE]/>/g;s/\\\//\//g;s/\\[ntr]/ /g')"
 
-# The loop belongs to the first session that stops in it. Cursor sends conversation_id instead; payloads with neither (headless CLI) are not bound.
+# The loop belongs to the first session that stops in it. Cursor sends conversation_id, Grok sends sessionId and Antigravity sends conversationId instead; payloads with neither (headless CLI) are not bound.
 PAYLOAD_SESSION_ID="$(printf '%s' "$RAW_INPUT" | json_raw session_id)"
 [[ -n "$PAYLOAD_SESSION_ID" ]] || PAYLOAD_SESSION_ID="$(printf '%s' "$RAW_INPUT" | json_raw conversation_id)"
+[[ -n "$PAYLOAD_SESSION_ID" ]] || PAYLOAD_SESSION_ID="$(printf '%s' "$RAW_INPUT" | json_raw sessionId)"
+[[ -n "$PAYLOAD_SESSION_ID" ]] || PAYLOAD_SESSION_ID="$(printf '%s' "$RAW_INPUT" | json_raw conversationId)"
 if [[ -n "$PAYLOAD_SESSION_ID" ]]; then
   if [[ -z "$SESSION_ID" ]]; then
     SESSION_ID="$PAYLOAD_SESSION_ID"
@@ -119,7 +133,7 @@ TEST_FEEDBACK=""
 TEST_STATUS=0
 
 end_output() {
-  if [[ "$HOST" == cursor ]]; then echo '{}'; else printf '{"systemMessage":%s}\n' "$(printf '%s' "$MSG" | json_str)"; fi
+  if [[ "$HOST" == cursor || "$HOST" == antigravity ]]; then echo '{}'; else printf '{"systemMessage":%s}\n' "$(printf '%s' "$MSG" | json_str)"; fi
 }
 
 # shortcut: state.env is writable by the agent, so TEST_COMMAND runs with whatever the agent wrote there. Full fix needs state outside the agent's writable scope (e.g. a sandbox deny rule on .ralph/state.env).
@@ -162,7 +176,7 @@ if [[ "$TOTAL_TASKS" -lt "$INITIAL_TASK_COUNT" ]]; then
 fi
 
 promise_ok() {
-  [[ "$HOST" == cursor && -z "$LAST_MSG" ]] && return 0
+  [[ ( "$HOST" == cursor || "$HOST" == antigravity ) && -z "$LAST_MSG" ]] && return 0
   [[ -n "$COMPLETION_PROMISE" ]] && { has_exact_promise "$LAST_MSG" "$COMPLETION_PROMISE"; return; }
   has_exact_promise "$LAST_MSG" COMPLETE || has_exact_promise "$LAST_MSG" DONE
 }
@@ -209,7 +223,9 @@ fi
 FEEDBACK="[$SYS_MSG]"$'\n\n'"${PLAN_BODY}${GIT_CTX}${TEST_FEEDBACK}"
 
 # Feedback goes through stdin: a command-line argument is capped by the OS (~128 KiB on Linux)
-if [[ "$HOST" == cursor ]]; then
+if [[ "$HOST" == antigravity ]]; then
+  RESULT="{\"decision\":\"continue\",\"reason\":$(printf '%s' "$FEEDBACK" | json_str)}"
+elif [[ "$HOST" == cursor ]]; then
   RESULT="{\"followup_message\":$(printf '%s' "$FEEDBACK" | json_str)}"
 else
   [[ -z "${RALPH_FEEDBACK_FILE:-}" ]] || printf '%s' "$FEEDBACK" > "$RALPH_FEEDBACK_FILE"
