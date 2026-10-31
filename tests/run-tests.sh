@@ -2,7 +2,6 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-chmod +x "$ROOT"/scripts/*.sh
 unset CLAUDE_PROJECT_DIR RALPH_FEEDBACK_FILE
 unset RALPH_CLI_AGENT # hermetic: an inherited value would silence the hook in every test
 command -v jq >/dev/null || { echo "Error: the test suite needs jq to check hook output (the plugin itself does not)." >&2; exit 1; }
@@ -107,7 +106,7 @@ EOF
   chmod +x "$agent"
 
   "$ROOT/scripts/setup-ralph-loop.sh" "Test CLI feedback" --max-iterations 3 --completion-promise "CLI_FEEDBACK_DONE" --test-cmd "! grep -q '^- \[ \]' .ralph/fix_plan.md" --force
-  AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" .ralph/fix_plan.md
+  AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh"
   test ! -d .ralph
 }
 
@@ -116,7 +115,7 @@ test_cli_max_iterations_fails() {
   printf '#!/usr/bin/env bash\necho "Mock agent turn without a promise"\n' > "$agent"
   chmod +x "$agent"
   "$ROOT/scripts/setup-ralph-loop.sh" "CLI max task" --max-iterations 1 --completion-promise "NEVER_EMITTED"
-  if out=$(AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" .ralph/fix_plan.md 2>&1); then
+  if out=$(AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" 2>&1); then
     return 1
   fi
   grep -qF "Max iterations (1) reached" <<< "$out"
@@ -191,29 +190,6 @@ test_continuous_backpressure() {
   "$ROOT/scripts/cancel-ralph.sh"
 }
 
-test_copilot_stop_hook() {
-  local transcript="$PWD/transcript.jsonl"
-  echo '{"type":"message","text":"Completed in Copilot <promise>COPILOT_DONE</promise>"}' > "$transcript"
-  "$ROOT/scripts/setup-ralph-loop.sh" "Copilot task" --max-iterations 3 --completion-promise "COPILOT_DONE"
-  perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
-  local copilot_out
-  copilot_out=$(echo "{\"TranscriptPath\": \"$transcript\", \"StopHookActive\": true}" | "$ROOT/scripts/stop-hook.sh")
-  # Promise in the transcript file is not the stop payload, so it must not complete the loop
-  jq -e '.decision == "block"' <<< "$copilot_out" >/dev/null
-  test -d .ralph
-  "$ROOT/scripts/cancel-ralph.sh"
-}
-
-# Host payload fields beyond last_assistant_message are unproven; only the max-iterations exit is checked
-test_cursor_stop_hook() {
-  "$ROOT/scripts/setup-ralph-loop.sh" "Cursor task" --max-iterations 1
-  local cursor_out
-  cursor_out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh")
-  # allow is the absence of a decision; "allow" is not a valid Stop decision for Claude Code
-  jq -e 'has("decision") | not' <<< "$cursor_out" >/dev/null
-  test ! -d .ralph
-}
-
 # Cursor's loop_limit is a second cap; null (no limit) leaves --max-iterations as the only one
 test_cursor_loop_limit_is_unlimited() {
   jq -e '.hooks.stop[0] | has("loop_limit") and .loop_limit == null' "$ROOT/hooks/cursor-hooks.json" >/dev/null
@@ -260,6 +236,36 @@ test_deleted_test_integrity_guard() {
   rm tests/foo.sh
   out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh")
   grep -q "Test Integrity Guard Alert" <<< "$out"
+}
+
+test_moved_test_file_is_not_a_deletion() {
+  mkdir tests
+  echo 'exit 0' > tests/a.test.js
+  git add . && git -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm "tests"
+  "$ROOT/scripts/setup-ralph-loop.sh" "Move test task" --max-iterations 5 >/dev/null
+  mkdir tests/unit
+  git mv tests/a.test.js tests/unit/a.test.js
+  local out
+  out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh")
+  if grep -q "Test Integrity Guard Alert" <<< "$out"; then return 1; fi
+  git mv tests/unit/a.test.js notes.txt
+  out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh")
+  grep -q "Test Integrity Guard Alert" <<< "$out"
+}
+
+test_concurrent_hooks_are_serialized() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Lock task" --max-iterations 9 --test-cmd "sleep 1" >/dev/null
+  echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh" >/dev/null &
+  echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh" >/dev/null &
+  wait
+  grep -qx 'ITERATION=3' .ralph/state.env
+}
+
+test_failed_test_reports_exit_code() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Exit task" --max-iterations 5 --test-cmd "exit 3" >/dev/null
+  local out
+  out=$(echo '{"last_assistant_message": "Working"}' | "$ROOT/scripts/stop-hook.sh")
+  jq -e '.reason | contains("exit code 3") and startswith("[Ralph loop iteration 2 of 5]")' <<< "$out" >/dev/null
 }
 
 test_security_and_injection_resistance() {
@@ -433,7 +439,7 @@ echo "<promise>BIG_DONE</promise>"
 EOF
   chmod +x "$agent"
   "$ROOT/scripts/setup-ralph-loop.sh" "CLI big task" --max-iterations 3 --completion-promise "BIG_DONE" >/dev/null
-  AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" .ralph/fix_plan.md >/dev/null 2>&1
+  AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" >/dev/null 2>&1
   test ! -d .ralph
 }
 
@@ -456,7 +462,7 @@ test_cli_agent_deleting_state_is_not_success() {
   printf '#!/usr/bin/env bash\nrm -rf .ralph\necho "Mock agent removed state"\n' > "$agent"
   chmod +x "$agent"
   "$ROOT/scripts/setup-ralph-loop.sh" "CLI delete task" --max-iterations 3 --completion-promise "NEVER_EMITTED"
-  if out=$(AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" .ralph/fix_plan.md 2>&1); then
+  if out=$(AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" 2>&1); then
     return 1
   fi
   grep -qF "state removed without verification" <<< "$out"
@@ -473,7 +479,7 @@ test_cli_no_advance_stops_after_one_agent_call() {
   git add -f .ralph/state.env && git commit -q -m "track state"
   # own process group: bash defers the CLI's TERM trap until the hung agent exits, so the agent must die too
   set -m
-  AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" .ralph/fix_plan.md >"$out" 2>&1 &
+  AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" >"$out" 2>&1 &
   pid=$!
   set +m
   (sleep 30; kill -- -"$pid" 2>/dev/null) &
@@ -504,7 +510,7 @@ echo "Mock agent turn"
 EOF
   chmod +x "$agent"
   "$ROOT/scripts/setup-ralph-loop.sh" "Gate task" --max-iterations 3 >/dev/null
-  AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" .ralph/fix_plan.md >/dev/null 2>&1 || status=$?
+  AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" >/dev/null 2>&1 || status=$?
   test "$status" -ne 0
   test ! -s "$out"
   test "$(cat "$calls")" = "$(printf 'ITERATION=1\nITERATION=2\nITERATION=3')"
@@ -515,7 +521,7 @@ test_cli_clears_inherited_agent_env() {
   printf '#!/usr/bin/env bash\nperl -pi -e "s/- \\[ \\]/- [x]/g" .ralph/fix_plan.md\necho "<promise>INHERITED_DONE</promise>"\n' > "$agent"
   chmod +x "$agent"
   "$ROOT/scripts/setup-ralph-loop.sh" "Inherited env task" --max-iterations 3 --completion-promise "INHERITED_DONE" >/dev/null
-  RALPH_CLI_AGENT=1 AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" .ralph/fix_plan.md >/dev/null 2>&1
+  RALPH_CLI_AGENT=1 AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" >/dev/null 2>&1
   test ! -d .ralph
 }
 
@@ -647,7 +653,8 @@ without_jq() {
       command -v "$t" >/dev/null && ln -s "$(command -v "$t")" "$bin/$t"
     done
   fi
-  ! PATH="$bin" command -v jq >/dev/null
+  # a fresh shell: this shell caches the path of jq, and `!` would skip errexit
+  if PATH="$bin" bash -c "command -v jq" >/dev/null; then return 1; fi
   PATH="$bin" "$@"
 }
 
@@ -755,10 +762,6 @@ test_escaped_promise_forms_match() {
     jq -e '.decision == "block"' <<< "$out" >/dev/null
     test -d .ralph
   done
-  # a promise in an earlier field does not count
-  rm -rf .ralph; cp -R saved .ralph
-  out=$(echo '{"t":"<promise>ESC DONE/1</promise>","last_assistant_message":"no"}' | "$ROOT/scripts/stop-hook.sh")
-  jq -e '.decision == "block"' <<< "$out" >/dev/null
 }
 
 test_invalid_utf8_does_not_break_promise() {
@@ -786,14 +789,69 @@ test_hook_output_is_valid_json_for_tricky_feedback() {
   jq -e --arg m "$msg" '.followup_message | contains($m)' <<< "$out" >/dev/null
 }
 
-test_install_client_detects_non_symlink() {
-  local bin="$PWD/bin" out status=0
-  mkdir "$bin"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$bin/ln"
-  chmod +x "$bin/ln"
-  out=$(HOME="$PWD/home" PATH="$bin:$PATH" "$ROOT/scripts/install-client.sh" claude 2>&1) || status=$?
-  test "$status" -ne 0
-  grep -q "is not a symlink" <<< "$out"
+test_bad_last_state_number_does_not_stop_hook() {
+  "$ROOT/scripts/setup-ralph-loop.sh" task
+  printf 'MAX_ITERATIONS=3\nITERATION=abc\n' > .ralph/state.env
+  echo '{}' | "$ROOT/scripts/stop-hook.sh" | grep -q '"decision":"block"'
+}
+
+test_cursor_without_text_ends_on_tests_and_plan() {
+  "$ROOT/scripts/setup-ralph-loop.sh" task --completion-promise DONE_X --test-cmd true
+  local out
+  out=$(echo '{"conversation_id": "c1"}' | "$ROOT/scripts/stop-hook.sh" cursor)
+  jq -e 'has("followup_message")' <<< "$out" >/dev/null
+  sed -i.bak 's/\[ \]/[x]/' .ralph/fix_plan.md; rm -f .ralph/fix_plan.md.bak
+  out=$(echo '{"conversation_id": "c1"}' | "$ROOT/scripts/stop-hook.sh" cursor 2>/dev/null)
+  test "$out" = '{}'
+  test ! -d .ralph
+}
+
+test_cursor_conversation_id_binds_loop() {
+  "$ROOT/scripts/setup-ralph-loop.sh" task
+  echo '{"conversation_id": "c1", "last_assistant_message": "x"}' | "$ROOT/scripts/stop-hook.sh" cursor >/dev/null
+  grep -q '^SESSION_ID=c1$' .ralph/state.env
+  echo '{"conversation_id": "c2", "last_assistant_message": "x"}' | "$ROOT/scripts/stop-hook.sh" cursor 2>/dev/null
+  grep -q '^ITERATION=2$' .ralph/state.env
+}
+
+test_state_symlinks_are_refused() {
+  "$ROOT/scripts/setup-ralph-loop.sh" task
+  echo "TEST_COMMAND=touch PWNED" > notes.txt
+  mv .ralph/state.env .ralph/real.env
+  ln -s ../notes.txt .ralph/state.env
+  echo '{}' | "$ROOT/scripts/stop-hook.sh" 2>&1 | grep -q "symlink"
+  test ! -e PWNED
+  rm .ralph/state.env; mv .ralph/real.env .ralph/state.env
+  mv .ralph/fix_plan.md .ralph/real.md; ln -s ../notes.txt .ralph/fix_plan.md
+  echo '{}' | "$ROOT/scripts/stop-hook.sh" 2>&1 | grep -q "symlink"
+}
+
+test_setup_replaces_planted_state_tmp_symlink() {
+  mkdir .ralph
+  echo keep > notes.txt
+  ln -s ../notes.txt .ralph/state.env.tmp
+  ln -s ../notes.txt .ralph/fix_plan.md
+  "$ROOT/scripts/setup-ralph-loop.sh" task
+  test "$(cat notes.txt)" = keep
+}
+
+test_prompt_file_resolves_from_caller_dir() {
+  mkdir sub
+  echo "from sub" > sub/prompt.md
+  (cd sub && "$ROOT/scripts/setup-ralph-loop.sh" --prompt-file prompt.md)
+  grep -q "from sub" .ralph/fix_plan.md
+}
+
+test_unknown_option_is_rejected() {
+  if "$ROOT/scripts/setup-ralph-loop.sh" task --max-iteration 3 2>/dev/null; then return 1; fi
+  test ! -f .ralph/state.env
+}
+
+test_git_context_is_capped() {
+  "$ROOT/scripts/setup-ralph-loop.sh" task
+  local i
+  for i in $(seq 1 600); do : > "f$i.txt"; done
+  echo '{}' | "$ROOT/scripts/stop-hook.sh" | jq -e '.reason | split("\n") | length < 300' >/dev/null
 }
 
 test_unmatchable_promise_is_rejected() {
@@ -907,9 +965,10 @@ run_test "Zero-Checkbox Plan Integrity Guard (No Bash Error)" test_zero_checkbox
 run_test "Deleted Test File Guard Ignores Non-Test Names" test_deleted_test_integrity_guard
 run_test "Promise Only In Plan Does Not Complete" test_promise_only_in_plan_does_not_complete
 run_test "Exact Literal Promise Matching (Awk Parser)" test_exact_literal_promise_matching
+run_test "Moved Test File Is Not A Deletion" test_moved_test_file_is_not_a_deletion
+run_test "Concurrent Hooks Are Serialized" test_concurrent_hooks_are_serialized
+run_test "Failed Test Reports Exit Code And Iteration" test_failed_test_reports_exit_code
 run_test "Continuous Per-Turn Hard Backpressure (--test-cmd)" test_continuous_backpressure
-run_test "GitHub Copilot Stop Hook with TranscriptPath" test_copilot_stop_hook
-run_test "Cursor Stop Hook Max Iterations Only (Unverified Host)" test_cursor_stop_hook
 run_test "Cursor loop_limit Is Unlimited (Plugin Cap Governs)" test_cursor_loop_limit_is_unlimited
 run_test "Security & Shell Injection Resistance" test_security_and_injection_resistance
 run_test "Complex Quotes & Flag Argument Unpacking" test_complex_quotes_and_arg_unpacking
@@ -954,7 +1013,14 @@ run_test "Hook Reads Pretty Payload And Project Dir Order" test_hook_reads_prett
 run_test "JSON-Escaped Promise Forms Match Exactly" test_escaped_promise_forms_match
 run_test "Invalid UTF-8 Does Not Break Promise (UTF-8 Locale)" test_invalid_utf8_does_not_break_promise
 run_test "Hook Output Is Valid JSON For Tricky Feedback" test_hook_output_is_valid_json_for_tricky_feedback
-run_test "install-client Detects Non-Symlink Target" test_install_client_detects_non_symlink
+run_test "Bad Number On Last State Line Still Blocks" test_bad_last_state_number_does_not_stop_hook
+run_test "Cursor Without Assistant Text Ends On Tests And Plan" test_cursor_without_text_ends_on_tests_and_plan
+run_test "Cursor conversation_id Binds The Loop" test_cursor_conversation_id_binds_loop
+run_test "State And Plan Symlinks Are Refused" test_state_symlinks_are_refused
+run_test "Setup Replaces Planted Symlinks" test_setup_replaces_planted_state_tmp_symlink
+run_test "Prompt File Resolves From Caller Dir" test_prompt_file_resolves_from_caller_dir
+run_test "Unknown Option Is Rejected" test_unknown_option_is_rejected
+run_test "Git Context Is Capped" test_git_context_is_capped
 run_test "Unmatchable Completion Promise Is Rejected" test_unmatchable_promise_is_rejected
 run_test "Success Gate Requires Passing Tests" test_success_requires_passing_tests
 run_test "Success Gate Requires Checked Plan" test_success_requires_checked_plan

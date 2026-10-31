@@ -11,23 +11,14 @@ if [[ -n "$(git -C "$PROJECT_ROOT" ls-files ':(icase).ralph' 2>/dev/null)" ]]; t
 fi
 
 if [[ -d "$STATE_DIR" || -f "$STATE_FILE" ]]; then
-  ITER=""
   if [[ -f "$STATE_FILE" ]]; then
-    while IFS= read -r line || [[ -n "$line" ]]; do
-      [[ "$line" == *=* ]] || continue
-      key="${line%%=*}"
-      val="${line#*=}"
-      if [[ "$key" == "ITERATION" && "$val" =~ ^[0-9]+$ ]]; then
-        ITER="$val"
-      fi
-    done < "$STATE_FILE"
-  fi
-  rm -rf "$STATE_DIR"
-  if [[ -n "$ITER" ]]; then
-    echo "Ralph loop canceled at iteration $ITER."
+    source "$(dirname "${BASH_SOURCE[0]}")/lib/state.sh"
+    read_state
+    echo "Ralph loop canceled at iteration $ITERATION."
   else
     echo "Ralph loop canceled."
   fi
+  rm -rf "$STATE_DIR"
 else
   echo "No active Ralph loop found."
 fi

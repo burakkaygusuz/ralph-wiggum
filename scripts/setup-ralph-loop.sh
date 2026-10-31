@@ -2,6 +2,7 @@
 set -euo pipefail
 umask 077
 
+CALLER_DIR="$PWD"
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "Error: Ralph loop must run inside a git repository." >&2; exit 1; }
 cd "$PROJECT_ROOT"
 EXCLUDE_FILE="$(git rev-parse --git-path info/exclude)"
@@ -28,12 +29,14 @@ while [ "$#" -gt 0 ]; do
     --completion-promise) [[ $# -ge 2 ]] || { echo "Error: --completion-promise requires a value" >&2; exit 1; }; COMPLETION_PROMISE="$2"; shift 2 ;;
     --test-cmd) [[ $# -ge 2 ]] || { echo "Error: --test-cmd requires a value" >&2; exit 1; }; TEST_CMD="$2"; shift 2 ;;
     --prompt-file) [[ $# -ge 2 ]] || { echo "Error: --prompt-file requires a value" >&2; exit 1; }; PROMPT_FILE="$2"; shift 2 ;;
+    --*) echo "Error: unknown option $1" >&2; exit 1 ;;
     *) prompt_parts+=("$1"); shift ;;
   esac
 done
 
 if [[ -n "$PROMPT_FILE" ]]; then
   [[ ${#prompt_parts[@]} -eq 0 ]] || { echo "Error: pass the prompt either as arguments or with --prompt-file, not both" >&2; exit 1; }
+  [[ "$PROMPT_FILE" == /* ]] || PROMPT_FILE="$CALLER_DIR/$PROMPT_FILE"
   [[ -f "$PROMPT_FILE" ]] || { echo "Error: prompt file $PROMPT_FILE not found" >&2; exit 1; }
   PROMPT="$(cat "$PROMPT_FILE")"
 else
@@ -75,7 +78,9 @@ fi
 BASE_COMMIT="$(git -C "$PROJECT_ROOT" rev-parse --verify -q HEAD)" || { echo "Error: Ralph loop needs a commit as its baseline for the test integrity guard." >&2; exit 1; }
 
 mkdir -p "$STATE_DIR"
+[[ "$FORCE" = false ]] || rm -rf "$STATE_DIR/.lock"
 
+rm -f "$PLAN_FILE" # replace a planted symlink instead of writing through it
 cat <<EOF > "$PLAN_FILE"
 # Ralph Implementation Plan & State Scheduler
 
@@ -101,7 +106,8 @@ EOF
 
 INITIAL_TASK_COUNT=$(grep -Ec "^[[:space:]]*- \[([ xX])\]" "$PLAN_FILE")
 
-cat > "$STATE_FILE.tmp" <<EOF
+STATE_TMP="$(mktemp "$STATE_DIR/state.XXXXXX")"
+cat > "$STATE_TMP" <<EOF
 ITERATION=1
 MAX_ITERATIONS=$MAX_ITERATIONS
 COMPLETION_PROMISE=$COMPLETION_PROMISE
@@ -110,6 +116,6 @@ BASE_COMMIT=$BASE_COMMIT
 INITIAL_TASK_COUNT=$INITIAL_TASK_COUNT
 STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
-mv "$STATE_FILE.tmp" "$STATE_FILE"
+mv "$STATE_TMP" "$STATE_FILE"
 
 echo "Ralph loop initialized (Iteration 1, Max: $([[ "$MAX_ITERATIONS" -gt 0 ]] && echo "$MAX_ITERATIONS" || echo unlimited), Promise: ${COMPLETION_PROMISE:-none})"

@@ -5,12 +5,13 @@ PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 STATE_DIR="$PROJECT_ROOT/.ralph"
 STATE_FILE="$STATE_DIR/state.env"
 PID_FILE="$STATE_DIR/cli.pid"
-PLAN_FILE="${1:-$STATE_DIR/fix_plan.md}"
+PLAN_FILE="$STATE_DIR/fix_plan.md"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_BIN="${AGENT_BIN:-claude}"
 STOP_HOOK="$SCRIPT_DIR/stop-hook.sh"
 source "$SCRIPT_DIR/lib/json.sh"
+source "$SCRIPT_DIR/lib/state.sh"
 
 [[ ! -f "$PLAN_FILE" || ! -f "$STATE_FILE" ]] && { echo "Error: Ralph loop not initialized. Run ${SCRIPT_DIR}/setup-ralph-loop.sh first." >&2; exit 1; }
 
@@ -25,32 +26,13 @@ fi
 echo "$$" > "$PID_FILE"
 trap 'rm -f "$PID_FILE"' EXIT
 
+# shellcheck disable=SC2329 # called through trap
 cleanup() {
   echo -e "\nRalph loop canceled by user."
   rm -rf "$STATE_DIR"
   exit 130
 }
 trap cleanup INT TERM HUP
-
-read_state() {
-  ITERATION=1
-  MAX_ITERATIONS=10
-  COMPLETION_PROMISE=""
-  TEST_COMMAND=""
-  STARTED_AT=""
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    [[ "$line" == *=* ]] || continue
-    key="${line%%=*}"
-    val="${line#*=}"
-    case "$key" in
-      ITERATION) [[ "$val" =~ ^[0-9]+$ ]] && ITERATION="$val" ;;
-      MAX_ITERATIONS) [[ "$val" =~ ^[0-9]+$ ]] && MAX_ITERATIONS="$val" ;;
-      COMPLETION_PROMISE) COMPLETION_PROMISE="$val" ;;
-      TEST_COMMAND) TEST_COMMAND="$val" ;;
-      STARTED_AT) STARTED_AT="$val" ;;
-    esac
-  done < "$STATE_FILE"
-}
 
 read_state
 echo "Starting Ralph Loop on '$PLAN_FILE' with '$AGENT_BIN' (Max: $([[ "$MAX_ITERATIONS" -gt 0 ]] && echo "$MAX_ITERATIONS" || echo unlimited))..."
@@ -70,11 +52,11 @@ while :; do
     EXIT_CODE=1
     break
   }
-  echo "$OUTPUT"
+  printf '%s\n' "$OUTPUT"
 
   HOOK_ERR_FILE="$(mktemp)"
   FEEDBACK_FILE="$(mktemp)"
-  printf '{"last_assistant_message":%s}' "$(printf '%s' "$OUTPUT" | json_str)" | RALPH_CLI_AGENT= RALPH_FEEDBACK_FILE="$FEEDBACK_FILE" "$STOP_HOOK" >/dev/null 2>"$HOOK_ERR_FILE" || true
+  printf '{"last_assistant_message":%s}' "$(printf '%s' "$OUTPUT" | json_str)" | RALPH_CLI_AGENT="" CLAUDE_PROJECT_DIR="$PROJECT_ROOT" RALPH_FEEDBACK_FILE="$FEEDBACK_FILE" "$STOP_HOOK" >/dev/null 2>"$HOOK_ERR_FILE" || true
   HOOK_ERR="$(cat "$HOOK_ERR_FILE")"
   FEEDBACK="$(cat "$FEEDBACK_FILE")"
   rm -f "$HOOK_ERR_FILE" "$FEEDBACK_FILE"
