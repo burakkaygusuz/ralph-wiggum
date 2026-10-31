@@ -12,7 +12,7 @@ Ralph Wiggum is an autonomous development loop plugin for AI coding assistants, 
 - **No More Half-Done Code:** The loop ends only when the agent outputs your completion promise (`<promise>COMPLETE</promise>`), the tests pass, and all work items are complete. (Cursor sends no assistant text, so there the tests, plan and guards decide.)
 - **Test Integrity Guard:** Deterministically verifies that existing test files are not deleted to bypass test backpressure.
 - **Git-Clean State:** Setup writes `.ralph/` to `.git/info/exclude` and does not touch `.gitignore`.
-- **Works Across All Agents:** Compatible with **Claude Code**, **Cursor**, **OpenAI Codex**, **Google Antigravity**, and **GitHub Copilot**. The `<promise>` is read only from the agent's last reply; this is verified on Claude Code only. Codex and Cursor use schema-compatible output but are unverified, and Antigravity and Copilot are unverified. This repo ships no Antigravity hook config, so the loop does not auto-continue there; use `ralph-cli.sh` for unattended runs.
+- **Works Across All Agents:** Compatible with **Claude Code**, **Grok Build**, **Cursor**, **OpenAI Codex**, **Google Antigravity**, and **GitHub Copilot**. The `<promise>` is read only from the agent's last reply; this is verified on Claude Code only. Codex, Cursor and Grok Build use schema-compatible output but are unverified, and Antigravity and Copilot are unverified. This repo ships no Antigravity hook config, so the loop does not auto-continue there; use `ralph-cli.sh` for unattended runs.
 - **Safety First:** The default iteration limit (`--max-iterations 10`), continuous per-turn test verification (`--test-cmd`), and cancellation at any time (`/cancel-ralph` or `Ctrl+C`).
 
 ---
@@ -39,6 +39,15 @@ Ralph Wiggum conforms to the [Agent Plugins Specification (v1.0.0)](https://agen
 /plugin marketplace add burakkaygusuz/ralph-wiggum
 /plugin install ralph-wiggum
 ```
+
+### Grok Build
+
+```bash
+grok plugin marketplace add burakkaygusuz/ralph-wiggum
+grok plugin install ralph-wiggum --trust
+```
+
+This follows the official Grok Build hook documentation; it was not run on a live `grok`. Grok sends the last reply as `lastAssistantMessage`, and the stop hook reads that key. Grok ends a turn after 8 continuations. Send a new prompt to continue the loop. No stop hook is documented for other Grok products (grok.com, X, the xAI API).
 
 ### OpenAI Codex & ChatGPT
 
@@ -134,7 +143,7 @@ For unbounded overnight tasks beyond chat host continuation limits:
 <plugin-dir>/scripts/ralph-cli.sh
 ```
 
-`ralph-cli.sh` runs `$AGENT_BIN --print -p <prompt>` each iteration. `AGENT_BIN` defaults to `claude`, so `--print -p` is Claude Code syntax; set `AGENT_BIN` to another binary only if it accepts the same flags. Do not run a plugin-enabled interactive session in the same repo while `ralph-cli.sh` runs.
+`ralph-cli.sh` runs `$AGENT_BIN -p <prompt>` each iteration. `AGENT_BIN` defaults to `claude`; set it to another binary (for example `grok`) only if it accepts the same flags. In headless mode, `grok` cancels tool calls that need permission, so set its permissions yourself. Do not run a plugin-enabled interactive session in the same repo while `ralph-cli.sh` runs.
 
 ---
 

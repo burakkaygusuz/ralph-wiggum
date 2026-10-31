@@ -47,7 +47,7 @@ while :; do
 
   [[ "$MAX_ITERATIONS" -gt 0 ]] && LIMIT=" of $MAX_ITERATIONS" || LIMIT=""
   echo "=== [Iteration $ITER$LIMIT] ==="
-  OUTPUT=$(RALPH_CLI_AGENT=1 "$AGENT_BIN" --print -p "$CURRENT_PROMPT" </dev/null) || {
+  OUTPUT=$(RALPH_CLI_AGENT=1 "$AGENT_BIN" -p "$CURRENT_PROMPT" </dev/null) || {
     echo "Agent process exited on iteration $ITER."
     EXIT_CODE=1
     break

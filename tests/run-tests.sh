@@ -94,7 +94,7 @@ test_cli_feedback_propagation() {
   local agent="$PWD/agent.sh"
   cat << 'EOF' > "$agent"
 #!/usr/bin/env bash
-PROMPT_ARG="$3"
+PROMPT_ARG="$2"
 if ! echo "$PROMPT_ARG" | grep -q "Automated Verification Failed"; then
   echo "Mock Agent Turn 1: Wrote code with failing test"
 else
@@ -405,6 +405,24 @@ test_promise_only_from_last_message() {
   out=$(echo '{"transcript": "<promise>FIELD_DONE</promise>", "last_assistant_message": "still going"}' | "$ROOT/scripts/stop-hook.sh")
   jq -e '.decision == "block"' <<< "$out" >/dev/null
   test -d .ralph
+}
+
+test_grok_payload() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Grok task" --max-iterations 5 --completion-promise "GROK_DONE"
+  perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
+  local out
+  out=$(echo '{"reason": "shutdown", "lastAssistantMessage": "<promise>GROK_DONE</promise>"}' | "$ROOT/scripts/stop-hook.sh")
+  test -z "$out"
+  grep -q "^ITERATION=1$" .ralph/state.env
+  out=$(echo '{"reason": "end_turn", "lastAssistantMessage": "working"}' | "$ROOT/scripts/stop-hook.sh")
+  jq -e '.decision == "block"' <<< "$out" >/dev/null
+  echo '{"sessionId": "grok-a", "reason": "end_turn", "lastAssistantMessage": "working"}' | "$ROOT/scripts/stop-hook.sh" >/dev/null
+  grep -q "^SESSION_ID=.*grok-a" .ralph/state.env
+  out=$(echo '{"sessionId": "grok-b", "reason": "end_turn", "lastAssistantMessage": "<promise>GROK_DONE</promise>"}' | "$ROOT/scripts/stop-hook.sh" 2>/dev/null)
+  test -z "$out"
+  test -d .ralph
+  echo '{"reason": "end_turn", "lastAssistantMessage": "<promise>GROK_DONE</promise>"}' | "$ROOT/scripts/stop-hook.sh"
+  test ! -d .ralph
 }
 
 test_host_specific_block_schema() {
@@ -989,6 +1007,7 @@ run_test "Unlimited & Untested Messages Are Clean" test_unlimited_and_untested_m
 run_test "Baseline Commit Recorded In State" test_baseline_commit_recorded
 run_test "Promise Outside Last Message Does Not Complete" test_promise_only_from_last_message
 run_test "Feedback With Control Characters Is Valid JSON" test_feedback_with_control_characters_is_valid_json
+run_test "Grok Payload Uses camelCase Message And Skips Session End" test_grok_payload
 run_test "Host-Specific Block Schema (Cursor vs Others)" test_host_specific_block_schema
 run_test "workspace_roots Locates Project" test_workspace_roots_locates_project
 run_test "Large Test Output Is Fed Back (>1MB)" test_large_test_output_is_fed_back

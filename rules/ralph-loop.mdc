@@ -30,6 +30,6 @@ When participating in an iterative Ralph development loop:
    - Record newly discovered architectural insights and quirks in `Working Memory & Cross-Turn Learnings`.
    - Mark the completed work item as `[x]` and document verification evidence in `.ralph/fix_plan.md`.
    - If `--completion-promise` is set, output `<promise>TEXT</promise>` in your last reply **ONLY** when you verified all work items and test criteria.
-   - Do not write the promise in `.ralph/fix_plan.md`. The stop hook reads it only from your last reply (`last_assistant_message`).
+   - Do not write the promise in `.ralph/fix_plan.md`. The stop hook reads it only from your last reply (`last_assistant_message`, or `lastAssistantMessage` on Grok).
    - Cursor sends no assistant text, so the hook reads no promise there. The loop ends when `--test-cmd` passes and every plan item is `[x]`.
    - In Cursor, check an item only after you verify it. Always pass `--test-cmd`.

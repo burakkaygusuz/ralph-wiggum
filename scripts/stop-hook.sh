@@ -67,13 +67,20 @@ fi
 
 read_state
 
+# Grok also fires Stop at session end (reason channel_closed or shutdown); no turn is left to continue.
+STOP_REASON="$(printf '%s' "$RAW_INPUT" | json_raw reason)"
+[[ -z "$STOP_REASON" || "$STOP_REASON" == "end_turn" ]] || exit 0
+
 # Promises are matched on the raw JSON content, not a decoded copy: undo the escapes hosts apply to < > / and whitespace.
 # Go-style JSON encoders emit \u003c and \u003e. Setup rejects promises whose raw form differs from their text.
-LAST_MSG="$(printf '%s' "$RAW_INPUT" | json_raw last_assistant_message | LC_ALL=C sed 's/\\u003[cC]/</g;s/\\u003[eE]/>/g;s/\\\//\//g;s/\\[ntr]/ /g')"
+LAST_MSG_RAW="$(printf '%s' "$RAW_INPUT" | json_raw last_assistant_message)"
+[[ -n "$LAST_MSG_RAW" ]] || LAST_MSG_RAW="$(printf '%s' "$RAW_INPUT" | json_raw lastAssistantMessage)"
+LAST_MSG="$(printf '%s' "$LAST_MSG_RAW" | LC_ALL=C sed 's/\\u003[cC]/</g;s/\\u003[eE]/>/g;s/\\\//\//g;s/\\[ntr]/ /g')"
 
-# The loop belongs to the first session that stops in it. Cursor sends conversation_id instead; payloads with neither (headless CLI) are not bound.
+# The loop belongs to the first session that stops in it. Cursor sends conversation_id and Grok sends sessionId instead; payloads with neither (headless CLI) are not bound.
 PAYLOAD_SESSION_ID="$(printf '%s' "$RAW_INPUT" | json_raw session_id)"
 [[ -n "$PAYLOAD_SESSION_ID" ]] || PAYLOAD_SESSION_ID="$(printf '%s' "$RAW_INPUT" | json_raw conversation_id)"
+[[ -n "$PAYLOAD_SESSION_ID" ]] || PAYLOAD_SESSION_ID="$(printf '%s' "$RAW_INPUT" | json_raw sessionId)"
 if [[ -n "$PAYLOAD_SESSION_ID" ]]; then
   if [[ -z "$SESSION_ID" ]]; then
     SESSION_ID="$PAYLOAD_SESSION_ID"
