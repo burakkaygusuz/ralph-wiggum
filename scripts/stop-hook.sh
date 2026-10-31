@@ -146,7 +146,7 @@ else
   DELETED_TESTS=""
   while IFS=$'\t' read -r status old new; do
     [[ "$old" =~ $TEST_PATH_RE ]] || continue
-    [[ "$status" == R* && "$new" =~ $TEST_PATH_RE ]] && continue
+    [[ "$status" == R* && "$new" =~ $TEST_PATH_RE && "${old##*/}" == "${new##*/}" ]] && continue
     DELETED_TESTS+="$old"$'\n'
   done <<< "$DELETED_FILES"
   DELETED_TESTS="${DELETED_TESTS%$'\n'}"
