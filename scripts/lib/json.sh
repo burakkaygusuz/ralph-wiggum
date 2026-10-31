@@ -1,4 +1,4 @@
-# Minimal JSON helpers (sed and POSIX awk only, so jq is not a runtime dependency). Sourced by stop-hook.sh and ralph-cli.sh.
+# shellcheck shell=bash
 
 # shortcut: invalid UTF-8 bytes pass through unchanged (jq emitted U+FFFD), so a strict JSON parser may reject them; pipe through `iconv -c` if a host does.
 # json_str: stdin -> JSON string literal, quotes included. Exact for any input; non-ASCII passes through as UTF-8.
