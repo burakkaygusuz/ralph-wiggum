@@ -72,9 +72,8 @@ read_state
 STOP_REASON="$(printf '%s' "$RAW_INPUT" | json_raw reason)"
 [[ -z "$STOP_REASON" || "$STOP_REASON" == "end_turn" ]] || exit 0
 
-# Antigravity stops for errors or step limits, and while background tasks still run (fullyIdle false); only model_stop is a finished turn.
-TERMINATION_REASON="$(printf '%s' "$RAW_INPUT" | json_raw terminationReason)"
-[[ -z "$TERMINATION_REASON" || "$TERMINATION_REASON" == "model_stop" ]] || exit 0
+# Antigravity also stops on a system error, and while background tasks still run (fullyIdle false). Its terminationReason values are not documented reliably (live: NO_TOOL_CALL), so it is not used.
+[[ -z "$(printf '%s' "$RAW_INPUT" | json_raw error)" ]] || exit 0
 [[ ! "$RAW_INPUT" =~ \"fullyIdle\"[[:space:]]*:[[:space:]]*false ]] || exit 0
 
 # Promises are matched on the raw JSON content, not a decoded copy: undo the escapes hosts apply to < > / and whitespace.

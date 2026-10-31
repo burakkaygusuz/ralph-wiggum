@@ -38,16 +38,17 @@ jobs:
 
       - name: Validate all manifests
         run: |
-          for f in plugin.json .claude-plugin/plugin.json .codex-plugin/plugin.json .antigravity-plugin/plugin.json; do
+          for f in plugin.json .claude-plugin/plugin.json .codex-plugin/plugin.json .antigravity-plugin/plugin.json .cursor-plugin/plugin.json; do
             jq -e '.name == "ralph-wiggum" and (.version | test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))' "$f" >/dev/null || { echo "::error file=$f::bad name or version"; exit 1; }
           done
-          [ "$(jq -r .version plugin.json .claude-plugin/plugin.json .codex-plugin/plugin.json .antigravity-plugin/plugin.json | sort -u | wc -l)" -eq 1 ] || { echo "::error::manifest versions differ"; exit 1; }
+          [ "$(jq -r .version plugin.json .claude-plugin/plugin.json .codex-plugin/plugin.json .antigravity-plugin/plugin.json .cursor-plugin/plugin.json | sort -u | wc -l)" -eq 1 ] || { echo "::error::manifest versions differ"; exit 1; }
           for f in .claude-plugin/marketplace.json .agents/plugins/marketplace.json; do
             jq -e '.name == "ralph-wiggum" and .plugins[0].name == "ralph-wiggum" and .plugins[0].source == "./"' "$f" >/dev/null || { echo "::error file=$f::bad marketplace entry"; exit 1; }
           done
           jq -e '.owner.name != null' .claude-plugin/marketplace.json >/dev/null || { echo "::error::marketplace.json needs owner.name"; exit 1; }
           jq -e '.hooks == "./hooks/hooks.json" and .commands == "./commands"' .claude-plugin/plugin.json >/dev/null || { echo "::error::bad .claude-plugin hooks/commands"; exit 1; }
           jq -e '.hooks == "./hooks/hooks.json"' .codex-plugin/plugin.json >/dev/null || { echo "::error::bad .codex-plugin hooks"; exit 1; }
+          jq -e '.hooks == "./hooks/cursor-hooks.json"' .cursor-plugin/plugin.json >/dev/null || { echo "::error::bad .cursor-plugin hooks"; exit 1; }
           jq -e '.["ralph-wiggum"].Stop[0].command | startswith("bash ./scripts/stop-hook.sh antigravity")' hooks.json >/dev/null || { echo "::error::bad Antigravity hooks.json"; exit 1; }
           test -f hooks/hooks.json -a -d commands
           echo "all manifests valid"
@@ -103,10 +104,10 @@ jobs:
               data = json.loads(p.read_text(encoding='utf-8'))
               data['version'] = os.environ['NEXT_VERSION']
               p.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
-          " plugin.json .claude-plugin/plugin.json .codex-plugin/plugin.json .antigravity-plugin/plugin.json
+          " plugin.json .claude-plugin/plugin.json .codex-plugin/plugin.json .antigravity-plugin/plugin.json .cursor-plugin/plugin.json
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add plugin.json .claude-plugin/plugin.json .codex-plugin/plugin.json .antigravity-plugin/plugin.json
+          git add plugin.json .claude-plugin/plugin.json .codex-plugin/plugin.json .antigravity-plugin/plugin.json .cursor-plugin/plugin.json
           git diff-index --quiet HEAD || git commit -m "chore(release): bump version to $NEXT_VERSION [skip ci]"
           git push origin main
 

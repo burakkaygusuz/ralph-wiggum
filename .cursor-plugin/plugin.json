@@ -1,0 +1,14 @@
+{
+  "name": "ralph-wiggum",
+  "version": "2.1.0",
+  "description": "Autonomous, iterative, self-referential AI development loop.",
+  "author": {
+    "name": "Burak Kaygusuz"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "ralph-wiggum",
+    "autonomous-loop"
+  ],
+  "hooks": "./hooks/cursor-hooks.json"
+}

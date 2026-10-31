@@ -12,7 +12,7 @@ Ralph Wiggum is an autonomous development loop plugin for AI coding assistants, 
 - **No More Half-Done Code:** The loop ends only when the agent outputs your completion promise (`<promise>COMPLETE</promise>`), the tests pass, and all work items are complete. (Cursor and Antigravity send no assistant text, so there the tests, plan and guards decide.)
 - **Test Integrity Guard:** Deterministically verifies that existing test files are not deleted to bypass test backpressure.
 - **Git-Clean State:** Setup writes `.ralph/` to `.git/info/exclude` and does not touch `.gitignore`.
-- **Works Across All Agents:** Compatible with **Claude Code**, **Grok Build**, **Cursor**, **OpenAI Codex**, **Google Antigravity**, and **GitHub Copilot**. The `<promise>` is read only from the agent's last reply; this is verified on Claude Code only. Codex, Cursor, Grok Build and Antigravity use schema-compatible output but are unverified, and Copilot is unverified.
+- **Works Across All Agents:** Compatible with **Claude Code**, **Grok Build**, **Cursor**, **OpenAI Codex**, **Google Antigravity**, and **GitHub Copilot**. The `<promise>` is read only from the agent's last reply; this is verified on Claude Code only. Antigravity ran a full loop live (it sends no assistant text, so no promise is read). On Codex, setup and cancel ran live, but the stop hook did not run in `codex exec`. Cursor and Grok Build use schema-compatible output but are unverified, and Copilot is unverified.
 - **Safety First:** The default iteration limit (`--max-iterations 10`), continuous per-turn test verification (`--test-cmd`), and cancellation at any time (`/cancel-ralph` or `Ctrl+C`).
 
 ---
@@ -60,13 +60,15 @@ codex plugin add ralph-wiggum@ralph-wiggum
 
 Install via the Cursor / VS Code Agent Plugins interface. Cursor stop payloads carry no assistant text, so no `<promise>` can be read there. The loop ends in one of two cases. First, `--test-cmd` passes, every plan item is checked, and no test file was deleted. Second, the iteration limit is reached.
 
+The plugin ships `.cursor-plugin/plugin.json` (hooks from `hooks/cursor-hooks.json`, rules and skills from their default folders). It follows the official Cursor plugin docs; it was not run on a live Cursor.
+
 ### Google Antigravity
 
 ```bash
 agy plugin install https://github.com/burakkaygusuz/ralph-wiggum
 ```
 
-This follows the official Antigravity hook documentation; it was not run on a live `agy`. The root `hooks.json` runs the stop hook, and the hook answers `{"decision":"continue"}`. The Antigravity docs also show `"block"` for plugin hooks; if the loop does not continue, change `continue` in `scripts/stop-hook.sh`. Stop payloads carry no assistant text, so no `<promise>` can be read. The loop ends in the same two cases as on Cursor. The hook skips stops that are not `model_stop` or that have `fullyIdle` false.
+This was run on a live `agy` 1.4.12: install, a full loop in headless mode (`agy -p` needs `--dangerously-skip-permissions` or an allow rule, because headless mode cannot prompt), and `/cancel-ralph`. The root `hooks.json` runs the stop hook, and the hook answers `{"decision":"continue"}`. Stop payloads carry no assistant text, so no `<promise>` can be read. The loop ends in the same two cases as on Cursor. The hook skips stops that carry an `error` or that have `fullyIdle` false.
 
 ### Other Clients
 
@@ -89,7 +91,7 @@ No stop hook ships for other clients. Use `ralph-cli.sh` for unattended runs (se
 
 ## How to Use Across All Agents
 
-Ralph Loop can be invoked via **Slash Commands** (Claude Code), **Natural Language Prompts** (Cursor, Antigravity, Codex, Copilot), or **Headless CLI**.
+Ralph Loop can be invoked via **Slash Commands** (Claude Code; other hosts list the skills as slash forms, see "How to Cancel an Active Loop"), **Natural Language Prompts** (Cursor, Antigravity, Codex, Copilot), or **Headless CLI**.
 
 ### Scenario 1: Test-Driven Development (TDD with Hard Backpressure)
 
@@ -157,9 +159,13 @@ For unbounded overnight tasks beyond chat host continuation limits:
 
 ### How to Cancel an Active Loop
 
-- **Claude Code:** `/cancel-ralph`
-- **Cursor / Antigravity / Codex / Copilot (Chat):** `Cancel active ralph loop` or `Stop ralph loop`
+- **Claude Code, Grok Build, Cursor, Antigravity:** `/cancel-ralph`
+- **Codex:** `$cancel-ralph`
+- **Copilot (VS Code):** `/ralph-wiggum:cancel-ralph`
+- **Any chat:** `Cancel active ralph loop` or `Stop ralph loop`. The `cancel-ralph` skill runs the script.
 - **Terminal / CLI:** `<plugin-dir>/scripts/cancel-ralph.sh` or `Ctrl+C`
+
+Only Claude Code is verified. The other forms follow the host docs and were not run live.
 
 ---
 
