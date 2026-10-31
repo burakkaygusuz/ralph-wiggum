@@ -653,6 +653,14 @@ test_exclude_append_handles_missing_trailing_newline() {
   test "$(grep -cxF '.ralph/' .git/info/exclude)" -eq 1
 }
 
+test_setup_survives_read_only_exclude() {
+  chmod a-w .git/info/exclude
+  "$ROOT/scripts/setup-ralph-loop.sh" "Sandbox task" --max-iterations 3 >/dev/null 2>err.txt
+  chmod u+w .git/info/exclude
+  test -f .ralph/state.env
+  grep -q 'cannot write' err.txt || [[ "$(id -u)" -eq 0 ]]
+}
+
 test_diff_failure_blocks_verification() {
   "$ROOT/scripts/setup-ralph-loop.sh" "Diff failure task" --max-iterations 3 --completion-promise "DIFF_DONE" >/dev/null
   sed 's/^BASE_COMMIT=.*/BASE_COMMIT=deadbeef/' .ralph/state.env > state.tmp && mv state.tmp .ralph/state.env
@@ -1049,6 +1057,7 @@ run_test "Test Directory Variants Are Guarded" test_test_directory_variants_are_
 run_test "Bare State Line Without '=' Is Ignored" test_bare_state_line_is_ignored
 run_test "Setup Excludes State Before Requiring A Commit" test_setup_excludes_state_before_requiring_commit
 run_test "Exclude Append Handles Missing Trailing Newline" test_exclude_append_handles_missing_trailing_newline
+run_test "Setup Survives A Read-Only Exclude File" test_setup_survives_read_only_exclude
 run_test "Baseline Diff Failure Blocks Verification" test_diff_failure_blocks_verification
 run_test "Cancel Refuses Tracked .ralph State" test_cancel_refuses_tracked_state
 run_test "State Values Keep Trailing '=' (Bash 3.2 IFS Fix)" test_state_values_keep_trailing_equals
