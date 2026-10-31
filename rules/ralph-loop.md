@@ -1,6 +1,7 @@
 ---
 description: Autonomous iterative self-referential development protocol (Ralph Loop)
-globs: *
+alwaysApply: true
+trigger: always_on
 ---
 
 # Ralph Loop Autonomous Development Rule

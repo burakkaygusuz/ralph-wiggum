@@ -1,0 +1,15 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "ralph-wiggum",
+  "version": "2.0.5",
+  "description": "Autonomous, iterative, self-referential AI development loop.",
+  "author": {
+    "name": "Burak Kaygusuz"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "agent-plugin",
+    "ralph-wiggum",
+    "autonomous-loop"
+  ]
+}

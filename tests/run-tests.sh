@@ -425,6 +425,27 @@ test_grok_payload() {
   test ! -d .ralph
 }
 
+test_antigravity_payload() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Agy task" --max-iterations 5
+  perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
+  local repo="$PWD" elsewhere out
+  elsewhere="$(mktemp -d)"
+  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"error\", \"fullyIdle\": true, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
+  test -z "$out"
+  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"model_stop\", \"fullyIdle\": false, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
+  test -z "$out"
+  grep -q "^ITERATION=1$" .ralph/state.env
+  echo '- [ ] open item' >> .ralph/fix_plan.md
+  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"model_stop\", \"fullyIdle\": true, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
+  jq -e '.decision == "continue" and (.reason | length > 0) and (has("followup_message") | not)' <<< "$out" >/dev/null
+  grep -q "^SESSION_ID=.*c1" .ralph/state.env
+  perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
+  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"model_stop\", \"fullyIdle\": true, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
+  rm -rf "$elsewhere"
+  jq -e '. == {}' <<< "$out" >/dev/null
+  test ! -d .ralph
+}
+
 test_host_specific_block_schema() {
   "$ROOT/scripts/setup-ralph-loop.sh" "Schema task" --max-iterations 3
   local claude_out cursor_out
@@ -1008,6 +1029,7 @@ run_test "Baseline Commit Recorded In State" test_baseline_commit_recorded
 run_test "Promise Outside Last Message Does Not Complete" test_promise_only_from_last_message
 run_test "Feedback With Control Characters Is Valid JSON" test_feedback_with_control_characters_is_valid_json
 run_test "Grok Payload Uses camelCase Message And Skips Session End" test_grok_payload
+run_test "Antigravity Payload Uses continue And Skips Unfinished Stops" test_antigravity_payload
 run_test "Host-Specific Block Schema (Cursor vs Others)" test_host_specific_block_schema
 run_test "workspace_roots Locates Project" test_workspace_roots_locates_project
 run_test "Large Test Output Is Fed Back (>1MB)" test_large_test_output_is_fed_back
