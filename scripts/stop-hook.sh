@@ -5,6 +5,9 @@ umask 077
 HOST="${1:-}"
 source "$(dirname "${BASH_SOURCE[0]}")/lib/json.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/lib/state.sh"
+
+TEST_TIMEOUT=120
+LOCK_WAIT=125
 RAW_INPUT="$(LC_ALL=C tr '\n' ' ' || true)"
 # shortcut: paths are not JSON-decoded, so a cwd containing a backslash or quote (Windows paths) will not resolve
 HOOK_DIR="$(printf '%s' "$RAW_INPUT" | json_raw cwd)"
@@ -51,7 +54,7 @@ acquire_lock() {
     [[ -d "$STATE_DIR" ]] || exit 0
     sleep 0.05
     tries=$((tries + 1))
-    if [ "$tries" -ge 2500 ]; then # 125 s: outlasts the 120 s test timeout held under this lock
+    if [ "$tries" -ge $((LOCK_WAIT * 20)) ]; then # 20 tries per second
       rm -rf "$lock_dir" 2>/dev/null || true
       mkdir "$lock_dir" 2>/dev/null || true
       break
@@ -139,13 +142,13 @@ end_output() {
 if [[ -n "$TEST_COMMAND" ]]; then
   TIMEOUT_CMD="$(command -v timeout || command -v gtimeout || true)"
   set +e
-  TEST_OUTPUT=$(${TIMEOUT_CMD:+"$TIMEOUT_CMD" 120} bash -c "$TEST_COMMAND" 2>&1 | tail -c 120000) # pipefail keeps the test status; bounds memory
+  TEST_OUTPUT=$(${TIMEOUT_CMD:+"$TIMEOUT_CMD" "$TEST_TIMEOUT"} bash -c "$TEST_COMMAND" 2>&1 | tail -c 120000) # pipefail keeps the test status; bounds memory
   TEST_STATUS=$?
   set -e
   if [[ ${#TEST_OUTPUT} -gt 30000 ]]; then TEST_OUTPUT=${TEST_OUTPUT: -30000}; fi # keep the tail; failures print last
 
   if [[ "$TEST_STATUS" -ne 0 ]]; then
-    TEST_FEEDBACK=$'\n\n'"[Automated Verification Failed for '$TEST_COMMAND' (exit code $TEST_STATUS$([[ "$TEST_STATUS" -ne 124 ]] || echo ", timed out after 120 s"))]:"$'\n'"$TEST_OUTPUT"
+    TEST_FEEDBACK=$'\n\n'"[Automated Verification Failed for '$TEST_COMMAND' (exit code $TEST_STATUS$([[ "$TEST_STATUS" -ne 124 ]] || echo ", timed out after $TEST_TIMEOUT s"))]:"$'\n'"$TEST_OUTPUT"
   else
     TEST_FEEDBACK=$'\n\n'"[Automated Verification Passed for '$TEST_COMMAND' (Exit code: 0)]"
   fi
@@ -184,7 +187,7 @@ if promise_ok && [ "$TEST_STATUS" -eq 0 ] && [[ -z "$DELETED_TESTS" ]] && [[ "$T
   if ! grep -Eq "^[[:space:]]*- \[ \]" "$PLAN_FILE" 2>/dev/null; then
     MSG="Ralph loop: Verified${TEST_COMMAND:+ with test command '$TEST_COMMAND'} and all plan items complete!"
     echo "$MSG" >&2
-    rm -rf "$STATE_DIR"
+    rm -f "$STATE_FILE" # keep the plan so the user can review it
     end_output
     exit 0
   else
@@ -195,7 +198,7 @@ fi
 if [[ "$MAX_ITERATIONS" -gt 0 && "$ITERATION" -ge "$MAX_ITERATIONS" ]]; then
   MSG="Ralph loop: Max iterations ($MAX_ITERATIONS) reached without satisfying completion criteria."
   echo "$MSG" >&2
-  rm -rf "$STATE_DIR"
+  rm -f "$STATE_FILE"
   end_output
   exit 0
 fi

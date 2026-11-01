@@ -1,6 +1,7 @@
 # shellcheck shell=bash disable=SC2034 # the sourcing scripts use these variables
+DEFAULT_MAX_ITERATIONS=10
 read_state() {
-  ITERATION=1 MAX_ITERATIONS=10 COMPLETION_PROMISE="" TEST_COMMAND="" BASE_COMMIT="" INITIAL_TASK_COUNT=1 STARTED_AT="" SESSION_ID=""
+  ITERATION=1 MAX_ITERATIONS=$DEFAULT_MAX_ITERATIONS COMPLETION_PROMISE="" TEST_COMMAND="" BASE_COMMIT="" INITIAL_TASK_COUNT=1 STARTED_AT="" SESSION_ID=""
   local line key val
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" == *=* ]] || continue

@@ -11,10 +11,10 @@ Starts a Ralph loop in the current git repository. Writes .ralph/state.env and .
 Options:
   --max-iterations N          Iteration limit (default: 10, 0 = unlimited)
   --completion-promise TEXT   Text the agent prints in <promise>TEXT</promise> to finish (default: COMPLETE or DONE)
-  --test-cmd CMD              Command the stop hook runs before it accepts completion (default: none)
-  --prompt-file FILE          Read the task from FILE instead of arguments
+  --test-cmd CMD              Command the stop hook runs from the repo root on every stop, before it accepts completion (120 s limit if timeout or gtimeout is installed; default: none)
+  --prompt-file FILE          Read the task from FILE instead of arguments (a relative path resolves from the current directory)
   --force                     Replace an active loop
-  -h, --help                  Show this help
+  -h, --help                  Show this help (first argument only)
 
 Example:
   setup-ralph-loop.sh --max-iterations 5 --completion-promise DONE --test-cmd "npm test" "Fix the login bug"
@@ -40,8 +40,9 @@ STATE_DIR="$PROJECT_ROOT/.ralph"
 STATE_FILE="$STATE_DIR/state.env"
 PLAN_FILE="$STATE_DIR/fix_plan.md"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/state.sh"
 
-MAX_ITERATIONS=10
+MAX_ITERATIONS=$DEFAULT_MAX_ITERATIONS
 COMPLETION_PROMISE=""
 TEST_CMD=""
 PROMPT=""
@@ -145,4 +146,4 @@ STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
 mv "$STATE_TMP" "$STATE_FILE"
 
-echo "Ralph loop initialized (Iteration 1, Max: $([[ "$MAX_ITERATIONS" -gt 0 ]] && echo "$MAX_ITERATIONS" || echo unlimited), Promise: ${COMPLETION_PROMISE:-none})"
+echo "Ralph loop initialized (Iteration 1, Max: $([[ "$MAX_ITERATIONS" -gt 0 ]] && echo "$MAX_ITERATIONS" || echo unlimited), Promise: ${COMPLETION_PROMISE:-COMPLETE or DONE})"

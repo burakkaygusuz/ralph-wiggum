@@ -5,8 +5,6 @@ on:
     branches:
       - main
   pull_request:
-    branches:
-      - main
 
 permissions:
   contents: read
@@ -15,6 +13,7 @@ jobs:
   validate:
     name: Validate Manifest & Run Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,6 +59,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -77,10 +77,12 @@ jobs:
       group: release-main
       cancel-in-progress: false
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: main
           fetch-depth: 0
 
       - name: Calculate Next Version
@@ -98,18 +100,12 @@ jobs:
         env:
           NEXT_VERSION: ${{ steps.semver.outputs.nextStrict }}
         run: |
-          python3 -c "
-          import os, json, pathlib, sys
-          for name in sys.argv[1:]:
-              p = pathlib.Path(name)
-              data = json.loads(p.read_text(encoding='utf-8'))
-              data['version'] = os.environ['NEXT_VERSION']
-              p.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
-          " plugin.json .claude-plugin/plugin.json .codex-plugin/plugin.json .antigravity-plugin/plugin.json .cursor-plugin/plugin.json
+          for f in plugin.json .claude-plugin/plugin.json .codex-plugin/plugin.json .antigravity-plugin/plugin.json .cursor-plugin/plugin.json; do
+            jq --arg v "$NEXT_VERSION" '.version = $v' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+          done
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add plugin.json .claude-plugin/plugin.json .codex-plugin/plugin.json .antigravity-plugin/plugin.json .cursor-plugin/plugin.json
-          git diff-index --quiet HEAD || git commit -m "chore(release): bump version to $NEXT_VERSION [skip ci]"
+          git commit -am "chore(release): bump version to $NEXT_VERSION [skip ci]" || exit 0
           git push origin main
 
       - name: Publish GitHub Release & Tag

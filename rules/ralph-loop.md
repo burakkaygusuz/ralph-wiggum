@@ -8,6 +8,8 @@ trigger: always_on
 
 When participating in an iterative Ralph development loop:
 
+A loop is active only while `.ralph/state.env` exists. A `.ralph/fix_plan.md` without it is the record of a finished loop, not a task.
+
 1. **Plan & Backlog Inspection:**
    - Read `.ralph/fix_plan.md` and check `git status` at the start of your turn.
    - Consult the `Working Memory & Cross-Turn Learnings` section for architectural context discovered in prior turns.
@@ -30,7 +32,7 @@ When participating in an iterative Ralph development loop:
 6. **Scheduler, Learnings & Plan Update:**
    - Record newly discovered architectural insights and quirks in `Working Memory & Cross-Turn Learnings`.
    - Mark the completed work item as `[x]` and document verification evidence in `.ralph/fix_plan.md`.
-   - If `--completion-promise` is set, output `<promise>TEXT</promise>` in your last reply **ONLY** when you verified all work items and test criteria.
+   - Output `<promise>TEXT</promise>` in your last reply **ONLY** when you verified all work items and test criteria. TEXT is the `--completion-promise` value. Without that flag, use `COMPLETE` or `DONE`.
    - Do not write the promise in `.ralph/fix_plan.md`. The stop hook reads it only from your last reply (`last_assistant_message`, or `lastAssistantMessage` on Grok).
    - Cursor and Antigravity send no assistant text, so the hook reads no promise there. The loop ends when `--test-cmd` passes and every plan item is `[x]`.
    - In Cursor and Antigravity, check an item only after you verify it. Always pass `--test-cmd`.
