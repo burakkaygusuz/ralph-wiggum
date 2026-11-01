@@ -7,7 +7,7 @@ PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "Error: Ra
 cd "$PROJECT_ROOT"
 EXCLUDE_FILE="$(git rev-parse --git-path info/exclude)"
 mkdir -p "$(dirname "$EXCLUDE_FILE")"
-grep -qxF '.ralph/' "$EXCLUDE_FILE" 2>/dev/null || printf '\n.ralph/\n' >> "$EXCLUDE_FILE"
+grep -qxF '.ralph/' "$EXCLUDE_FILE" 2>/dev/null || printf '\n.ralph/\n' >> "$EXCLUDE_FILE" || echo "Warning: cannot write $EXCLUDE_FILE (read-only .git in a sandbox?). Add .ralph/ to your git ignore rules yourself." >&2
 
 STATE_DIR="$PROJECT_ROOT/.ralph"
 STATE_FILE="$STATE_DIR/state.env"

@@ -11,13 +11,13 @@ description: Run an autonomous, iterative development loop using the Ralph Wiggu
 
 - `PROMPT` (required): Task description, architecture requirements, and acceptance criteria.
 - `--max-iterations <N>` (optional, default: 10): Iteration limit (0 for unbounded).
-- `--completion-promise '<TEXT>'` (optional): Exact string in `<promise>TEXT</promise>` that stops the loop. In Cursor, the stop hook does not read the promise, because Cursor does not send assistant text. Without this flag, the hook accepts `<promise>COMPLETE</promise>` or `<promise>DONE</promise>`. Setup rejects TEXT that contains `<`, `\`, `"`, `&` or control characters. Setup also rejects TEXT that starts or ends with whitespace. The stop hook cannot find such TEXT in the reply.
+- `--completion-promise '<TEXT>'` (optional): Exact string in `<promise>TEXT</promise>` that stops the loop. In Cursor and Antigravity, the stop hook does not read the promise, because they do not send assistant text. Without this flag, the hook accepts `<promise>COMPLETE</promise>` or `<promise>DONE</promise>`. Setup rejects TEXT that contains `<`, `\`, `"`, `&` or control characters. Setup also rejects TEXT that starts or ends with whitespace. The stop hook cannot find such TEXT in the reply.
 - `--test-cmd '<CMD>'` (optional): Command that the stop hook runs before it accepts completion.
 - `--force` (optional): Replace the state of an active Ralph loop.
 
 ## Execution Workflow
 
-If `${CLAUDE_PLUGIN_ROOT}` has no value, use the folder two levels above this SKILL.md file instead. That folder contains `scripts/`.
+If `${CLAUDE_PLUGIN_ROOT}` has no value, or the text is still literal, use the absolute path of the folder two levels above this SKILL.md file instead. That folder contains `scripts/`. A relative path can resolve from the workspace, so do not use one.
 
 1. **Initialize State & Living Scheduler:**
    Write the task text verbatim to `.ralph/prompt.md`, then run the setup script. It reads that file without executing it, so quoting in the task text is never interpreted:

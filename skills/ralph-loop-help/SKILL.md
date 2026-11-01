@@ -22,8 +22,7 @@ The Ralph loop executes continuous, test-driven iterations over a living impleme
 
 ## Commands & Scripts
 
-If `${CLAUDE_PLUGIN_ROOT}` has no value, use the folder two levels above this SKILL.md file instead. That folder contains `scripts/`.
+If `${CLAUDE_PLUGIN_ROOT}` has no value, or the text is still literal, use the absolute path of the folder two levels above this SKILL.md file instead. That folder contains `scripts/`. A relative path can resolve from the workspace, so do not use one.
 
-- `/ralph-loop [PROMPT] [FLAGS]` or `${CLAUDE_PLUGIN_ROOT}/scripts/setup-ralph-loop.sh`
-- `/cancel-ralph` or `${CLAUDE_PLUGIN_ROOT}/scripts/cancel-ralph.sh`
+- Start and cancel: the slash form differs per host. See `README.md` in that folder, sections "How to Use Across All Agents" and "How to Cancel an Active Loop". Scripts: `${CLAUDE_PLUGIN_ROOT}/scripts/setup-ralph-loop.sh` and `${CLAUDE_PLUGIN_ROOT}/scripts/cancel-ralph.sh`.
 - `${CLAUDE_PLUGIN_ROOT}/scripts/ralph-cli.sh` for headless out-of-process execution.

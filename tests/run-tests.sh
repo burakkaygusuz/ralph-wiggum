@@ -430,17 +430,17 @@ test_antigravity_payload() {
   perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
   local repo="$PWD" elsewhere out
   elsewhere="$(mktemp -d)"
-  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"error\", \"fullyIdle\": true, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
+  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"ERROR\", \"error\": \"boom\", \"fullyIdle\": true, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
   test -z "$out"
-  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"model_stop\", \"fullyIdle\": false, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
+  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"NO_TOOL_CALL\", \"error\": \"\", \"fullyIdle\": false, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
   test -z "$out"
   grep -q "^ITERATION=1$" .ralph/state.env
   echo '- [ ] open item' >> .ralph/fix_plan.md
-  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"model_stop\", \"fullyIdle\": true, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
+  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"NO_TOOL_CALL\", \"error\": \"\", \"fullyIdle\": true, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
   jq -e '.decision == "continue" and (.reason | length > 0) and (has("followup_message") | not)' <<< "$out" >/dev/null
   grep -q "^SESSION_ID=.*c1" .ralph/state.env
   perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
-  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"model_stop\", \"fullyIdle\": true, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
+  out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"NO_TOOL_CALL\", \"error\": \"\", \"fullyIdle\": true, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
   rm -rf "$elsewhere"
   jq -e '. == {}' <<< "$out" >/dev/null
   test ! -d .ralph
@@ -651,6 +651,14 @@ test_exclude_append_handles_missing_trailing_newline() {
   "$ROOT/scripts/setup-ralph-loop.sh" "Newline task" --max-iterations 3 --force >/dev/null
   grep -qxF 'node_modules' .git/info/exclude
   test "$(grep -cxF '.ralph/' .git/info/exclude)" -eq 1
+}
+
+test_setup_survives_read_only_exclude() {
+  chmod a-w .git/info/exclude
+  "$ROOT/scripts/setup-ralph-loop.sh" "Sandbox task" --max-iterations 3 >/dev/null 2>err.txt
+  chmod u+w .git/info/exclude
+  test -f .ralph/state.env
+  grep -q 'cannot write' err.txt || [[ "$(id -u)" -eq 0 ]]
 }
 
 test_diff_failure_blocks_verification() {
@@ -1049,6 +1057,7 @@ run_test "Test Directory Variants Are Guarded" test_test_directory_variants_are_
 run_test "Bare State Line Without '=' Is Ignored" test_bare_state_line_is_ignored
 run_test "Setup Excludes State Before Requiring A Commit" test_setup_excludes_state_before_requiring_commit
 run_test "Exclude Append Handles Missing Trailing Newline" test_exclude_append_handles_missing_trailing_newline
+run_test "Setup Survives A Read-Only Exclude File" test_setup_survives_read_only_exclude
 run_test "Baseline Diff Failure Blocks Verification" test_diff_failure_blocks_verification
 run_test "Cancel Refuses Tracked .ralph State" test_cancel_refuses_tracked_state
 run_test "State Values Keep Trailing '=' (Bash 3.2 IFS Fix)" test_state_values_keep_trailing_equals
