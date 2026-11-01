@@ -41,6 +41,12 @@ run_test() {
   rm -f "$log_file"
 }
 
+# A finished loop removes only its state; the plan stays for review
+assert_loop_ended() {
+  test ! -e .ralph/state.env
+  test -f .ralph/fix_plan.md
+}
+
 test_setup_and_defaults() {
   "$ROOT/scripts/setup-ralph-loop.sh" "CI test task" --completion-promise "CI_DONE"
   test -f .ralph/state.env
@@ -107,7 +113,7 @@ EOF
 
   "$ROOT/scripts/setup-ralph-loop.sh" "Test CLI feedback" --max-iterations 3 --completion-promise "CLI_FEEDBACK_DONE" --test-cmd "! grep -q '^- \[ \]' .ralph/fix_plan.md" --force
   AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh"
-  test ! -d .ralph
+  assert_loop_ended
 }
 
 test_cli_max_iterations_fails() {
@@ -121,6 +127,11 @@ test_cli_max_iterations_fails() {
   if grep -q "finished successfully" <<< "$out"; then
     return 1
   fi
+  assert_loop_ended
+  test ! -e .ralph/cli.pid
+  out=$("$ROOT/scripts/cancel-ralph.sh")
+  grep -qF "No active Ralph loop found. Deleted" <<< "$out"
+  test ! -e .ralph
 }
 
 test_claude_stop_hook() {
@@ -133,7 +144,9 @@ test_claude_stop_hook() {
   perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
   res=$(echo '{"last_assistant_message": "Finished! <promise>CLAUDE_DONE</promise>"}' | "$ROOT/scripts/stop-hook.sh")
   jq -e 'has("decision") | not' <<< "$res" >/dev/null
-  test ! -d .ralph
+  assert_loop_ended
+  "$ROOT/scripts/setup-ralph-loop.sh" "Next task" >/dev/null
+  test -f .ralph/state.env
 }
 
 test_nested_cwd_independence() {
@@ -155,7 +168,7 @@ test_single_iteration_max_completion() {
   "$ROOT/scripts/setup-ralph-loop.sh" "Single turn task" --max-iterations 1 --completion-promise "SINGLE_DONE" --test-cmd "true"
   perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
   echo '{"last_assistant_message": "Done on turn 1! <promise>SINGLE_DONE</promise>"}' | "$ROOT/scripts/stop-hook.sh"
-  test ! -d .ralph
+  assert_loop_ended
 }
 
 test_anti_cheating_and_plan_integrity() {
@@ -166,17 +179,17 @@ EOF
   local ch_out
   ch_out=$(echo '{"last_assistant_message": "Done! <promise>INTEGRITY_DONE</promise>"}' | "$ROOT/scripts/stop-hook.sh")
   grep -q "Plan Integrity Guard Alert" <<< "$ch_out"
-  test -d .ralph
+  test -f .ralph/state.env
   "$ROOT/scripts/cancel-ralph.sh"
 }
 
 test_exact_literal_promise_matching() {
   "$ROOT/scripts/setup-ralph-loop.sh" "Exact promise task" --max-iterations 3 --completion-promise "AUTH_V1.0"
   echo '{"last_assistant_message": "False match <promise>AUTH_V100</promise>"}' | "$ROOT/scripts/stop-hook.sh" >/dev/null
-  test -d .ralph
+  test -f .ralph/state.env
   perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
   echo '{"last_assistant_message": "Exact match <promise>AUTH_V1.0</promise>"}' | "$ROOT/scripts/stop-hook.sh"
-  test ! -d .ralph
+  assert_loop_ended
 }
 
 test_continuous_backpressure() {
@@ -185,7 +198,7 @@ test_continuous_backpressure() {
   fail_out=$(echo '{"last_assistant_message": "Just wrote some code"}' | "$ROOT/scripts/stop-hook.sh")
   grep -q "Automated Verification Failed" <<< "$fail_out"
   grep -q "SUITE_42" <<< "$fail_out"
-  test -d .ralph
+  test -f .ralph/state.env
   "$ROOT/scripts/cancel-ralph.sh"
 }
 
@@ -200,7 +213,7 @@ test_promise_only_in_plan_does_not_complete() {
   perl -pi -e 's/- \[ \]/- \[x\]/g' .ralph/fix_plan.md
   echo "<promise>PLAN_ONLY</promise>" >> .ralph/fix_plan.md
   echo '{"last_assistant_message": "Still working on it"}' | "$ROOT/scripts/stop-hook.sh" >/dev/null
-  test -d .ralph
+  test -f .ralph/state.env
   "$ROOT/scripts/cancel-ralph.sh"
 }
 
@@ -403,7 +416,7 @@ test_promise_only_from_last_message() {
   local out
   out=$(echo '{"transcript": "<promise>FIELD_DONE</promise>", "last_assistant_message": "still going"}' | "$ROOT/scripts/stop-hook.sh")
   jq -e '.decision == "block"' <<< "$out" >/dev/null
-  test -d .ralph
+  test -f .ralph/state.env
 }
 
 test_grok_payload() {
@@ -419,9 +432,9 @@ test_grok_payload() {
   grep -q "^SESSION_ID=.*grok-a" .ralph/state.env
   out=$(echo '{"sessionId": "grok-b", "reason": "end_turn", "lastAssistantMessage": "<promise>GROK_DONE</promise>"}' | "$ROOT/scripts/stop-hook.sh" 2>/dev/null)
   test -z "$out"
-  test -d .ralph
+  test -f .ralph/state.env
   echo '{"reason": "end_turn", "lastAssistantMessage": "<promise>GROK_DONE</promise>"}' | "$ROOT/scripts/stop-hook.sh"
-  test ! -d .ralph
+  assert_loop_ended
 }
 
 test_antigravity_payload() {
@@ -442,7 +455,7 @@ test_antigravity_payload() {
   out=$(cd "$elsewhere" && echo "{\"terminationReason\": \"NO_TOOL_CALL\", \"error\": \"\", \"fullyIdle\": true, \"conversationId\": \"c1\", \"workspacePaths\": [\"$repo\"]}" | "$ROOT/scripts/stop-hook.sh" antigravity)
   rm -rf "$elsewhere"
   jq -e '. == {}' <<< "$out" >/dev/null
-  test ! -d .ralph
+  assert_loop_ended
 }
 
 test_host_specific_block_schema() {
@@ -483,7 +496,7 @@ EOF
   chmod +x "$agent"
   "$ROOT/scripts/setup-ralph-loop.sh" "CLI big task" --max-iterations 3 --completion-promise "BIG_DONE" >/dev/null
   AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" >/dev/null 2>&1
-  test ! -d .ralph
+  assert_loop_ended
 }
 
 test_feedback_with_control_characters_is_valid_json() {
@@ -565,7 +578,7 @@ test_cli_clears_inherited_agent_env() {
   chmod +x "$agent"
   "$ROOT/scripts/setup-ralph-loop.sh" "Inherited env task" --max-iterations 3 --completion-promise "INHERITED_DONE" >/dev/null
   RALPH_CLI_AGENT=1 AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" >/dev/null 2>&1
-  test ! -d .ralph
+  assert_loop_ended
 }
 
 test_agent_written_cli_pid_does_not_gate_hook() {
@@ -691,7 +704,7 @@ test_state_values_keep_trailing_equals() {
   grep -q "^TEST_COMMAND=echo ARG=$" .ralph/state.env
   perl -pi -e 's/- \[ \]/- [x]/g' .ralph/fix_plan.md
   echo '{"last_assistant_message": "<promise>DONE=</promise>"}' | "$ROOT/scripts/stop-hook.sh" >/dev/null
-  test ! -d .ralph
+  assert_loop_ended
 }
 
 # Runs "$@" with a PATH holding only symlinks to the tools the scripts need, so jq is provably not found
@@ -721,7 +734,7 @@ test_hook_and_cli_run_without_jq() {
   perl -pi -e 's/- \[ \]/- [x]/g' .ralph/fix_plan.md
   out=$(AGENT_BIN="$PWD/agent.sh" without_jq "$ROOT/scripts/ralph-cli.sh" 2>&1)
   grep -qF "Ralph loop finished successfully." <<< "$out"
-  test ! -d .ralph
+  assert_loop_ended
 }
 
 test_json_str_escapes_exactly() {
@@ -804,13 +817,13 @@ test_escaped_promise_forms_match() {
     rm -rf .ralph; cp -R saved .ralph
     out=$(printf '{"last_assistant_message":"%s"}\n' "$msg" | "$ROOT/scripts/stop-hook.sh" 2>/dev/null)
     jq -e '.systemMessage | contains("Verified")' <<< "$out" >/dev/null
-    test ! -d .ralph
+    assert_loop_ended
   done
   for msg in '<promise>ESC DONE/1X</promise>' '<promise>ESC DONE</promise>' '<promise>esc done/1</promise>' '<promise>ESC DONE/1 X</promise>'; do
     rm -rf .ralph; cp -R saved .ralph
     out=$(printf '{"last_assistant_message":"%s"}\n' "$msg" | "$ROOT/scripts/stop-hook.sh" 2>/dev/null)
     jq -e '.decision == "block"' <<< "$out" >/dev/null
-    test -d .ralph
+    test -f .ralph/state.env
   done
 }
 
@@ -820,7 +833,7 @@ test_invalid_utf8_does_not_break_promise() {
   local out
   out=$(printf '{"session_id":"s","cwd":"%s","last_assistant_message":"caf\351 <promise>LATIN_DONE</promise>"}' "$PWD" | LC_ALL=en_US.UTF-8 "$ROOT/scripts/stop-hook.sh" 2>/dev/null)
   jq -e '.systemMessage | contains("Verified")' <<< "$out" >/dev/null
-  test ! -d .ralph
+  assert_loop_ended
   "$ROOT/scripts/setup-ralph-loop.sh" "Latin1 cli task" --max-iterations 3 --completion-promise LATIN_DONE >/dev/null
   perl -pi -e 's/- \[ \]/- [x]/g' .ralph/fix_plan.md
   printf '#!/usr/bin/env bash\nprintf "caf\\351 <promise>LATIN_DONE</promise>\\n"\n' > agent.sh
@@ -853,7 +866,7 @@ test_cursor_without_text_ends_on_tests_and_plan() {
   sed -i.bak 's/\[ \]/[x]/' .ralph/fix_plan.md; rm -f .ralph/fix_plan.md.bak
   out=$(echo '{"conversation_id": "c1"}' | "$ROOT/scripts/stop-hook.sh" cursor 2>/dev/null)
   test "$out" = '{}'
-  test ! -d .ralph
+  assert_loop_ended
 }
 
 test_cursor_conversation_id_binds_loop() {
@@ -976,7 +989,7 @@ test_success_requires_passing_tests() {
   local out
   out=$(echo '{"last_assistant_message": "<promise>GATE_FAIL</promise>"}' | "$ROOT/scripts/stop-hook.sh")
   jq -e '.decision == "block"' <<< "$out" >/dev/null
-  test -d .ralph
+  test -f .ralph/state.env
   "$ROOT/scripts/cancel-ralph.sh"
 }
 
@@ -986,7 +999,7 @@ test_success_requires_checked_plan() {
   local out
   out=$(echo '{"last_assistant_message": "<promise>PLAN_OPEN</promise>"}' | "$ROOT/scripts/stop-hook.sh")
   grep -q "unchecked work items remain" <<< "$out"
-  test -d .ralph
+  test -f .ralph/state.env
   "$ROOT/scripts/cancel-ralph.sh"
 }
 
@@ -998,7 +1011,7 @@ test_base_commit_option_is_not_passed_to_git() {
   out=$(echo '{"last_assistant_message": "<promise>BASE_DONE</promise>"}' | "$ROOT/scripts/stop-hook.sh")
   test ! -e FILE
   jq -e '.decision == "block"' <<< "$out" >/dev/null
-  test -d .ralph
+  test -f .ralph/state.env
 }
 
 test_cursor_aborted_run_does_not_advance() {
@@ -1049,9 +1062,9 @@ test_loop_binds_to_first_stopping_session() {
   grep -q "bound to session sess-a" "$PWD/err.txt"
   grep -q "setup-ralph-loop.sh --force" "$PWD/err.txt"
   grep -q "^ITERATION=2$" .ralph/state.env
-  test -d .ralph
+  test -f .ralph/state.env
   echo '{"session_id": "sess-a", "last_assistant_message": "<promise>SESSION_DONE</promise>"}' | "$ROOT/scripts/stop-hook.sh" >/dev/null
-  test ! -d .ralph
+  assert_loop_ended
 }
 
 echo "=== Running Ralph Wiggum Test Suite ==="

@@ -5,7 +5,7 @@ usage() {
   cat <<'EOF'
 Usage: cancel-ralph.sh [-h|--help]
 
-Cancels the active Ralph loop in the current git repository and deletes its .ralph state.
+Cancels the active Ralph loop in the current git repository and deletes the .ralph folder (state and plan).
 Takes no arguments.
 
 Exit codes:
@@ -38,7 +38,7 @@ if [[ -d "$STATE_DIR" || -f "$STATE_FILE" ]]; then
     read_state
     echo "Ralph loop canceled at iteration $ITERATION."
   else
-    echo "Ralph loop canceled."
+    echo "No active Ralph loop found. Deleted the leftover .ralph folder."
   fi
   rm -rf "$STATE_DIR"
 else

@@ -184,7 +184,7 @@ if promise_ok && [ "$TEST_STATUS" -eq 0 ] && [[ -z "$DELETED_TESTS" ]] && [[ "$T
   if ! grep -Eq "^[[:space:]]*- \[ \]" "$PLAN_FILE" 2>/dev/null; then
     MSG="Ralph loop: Verified${TEST_COMMAND:+ with test command '$TEST_COMMAND'} and all plan items complete!"
     echo "$MSG" >&2
-    rm -rf "$STATE_DIR"
+    rm -f "$STATE_FILE" # keep the plan so the user can review it
     end_output
     exit 0
   else
@@ -195,7 +195,7 @@ fi
 if [[ "$MAX_ITERATIONS" -gt 0 && "$ITERATION" -ge "$MAX_ITERATIONS" ]]; then
   MSG="Ralph loop: Max iterations ($MAX_ITERATIONS) reached without satisfying completion criteria."
   echo "$MSG" >&2
-  rm -rf "$STATE_DIR"
+  rm -f "$STATE_FILE"
   end_output
   exit 0
 fi
