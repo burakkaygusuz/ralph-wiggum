@@ -911,6 +911,13 @@ test_cli_help_exits_zero() {
   test ! -e .ralph
 }
 
+test_copilot_hooks_layout() {
+  jq -e '.version == 1 and (.hooks.Stop[0].bash | contains("stop-hook.sh"))' "$ROOT/com.github.copilot/hooks/hooks.json" >/dev/null
+  jq -e '.extensions | has("com.github.copilot") | not' "$ROOT/plugin.json" >/dev/null
+  # Codex 0.166.0 loads no plugin hooks when the root manifest declares $schema (tested live).
+  jq -e 'has("$schema") | not' "$ROOT/plugin.json" >/dev/null
+}
+
 test_cli_unknown_option_exits_2() {
   local status=0
   "$ROOT/scripts/ralph-cli.sh" --bogus >/dev/null 2>&1 || status=$?
@@ -1125,6 +1132,7 @@ run_test "Unknown Option Is Rejected" test_unknown_option_is_rejected
 run_test "Setup --help Exits 0 And Creates No State" test_setup_help_exits_zero
 run_test "CLI --help Exits 0 And Creates No State" test_cli_help_exits_zero
 run_test "CLI Unknown Option Exits 2" test_cli_unknown_option_exits_2
+run_test "Copilot Hooks Live In The Namespace Directory" test_copilot_hooks_layout
 run_test "Setup Reads --help Only As First Argument" test_setup_help_only_as_first_arg
 run_test "Cancel --help Exits 0 And Keeps State" test_cancel_help_keeps_state
 run_test "Cancel Unknown Option Exits 2 And Keeps State" test_cancel_unknown_option_exits_2

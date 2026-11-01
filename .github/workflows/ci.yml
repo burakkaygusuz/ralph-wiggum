@@ -27,14 +27,14 @@ jobs:
       - name: Validate plugin.json
         run: |
           jq -e '
-            ."$schema" == "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json" and
+            has("$schema") == false and
             .name == "ralph-wiggum" and
             .version != null and
             .extensions["com.anthropic.claude-code"] != null and
             .extensions["com.anysphere.cursor"] != null and
             (.skills == null)
           ' plugin.json >/dev/null
-          echo "plugin.json conforms to the Agent Plugins 1.0.0 fields checked above"
+          echo 'plugin.json checks passed (no $schema: Codex loads no plugin hooks when it is declared)'
 
       - name: Validate all manifests
         run: |
@@ -50,6 +50,7 @@ jobs:
           jq -e '.hooks == "./hooks/hooks.json"' .codex-plugin/plugin.json >/dev/null || { echo "::error::bad .codex-plugin hooks"; exit 1; }
           jq -e '.hooks == "./hooks/cursor-hooks.json"' .cursor-plugin/plugin.json >/dev/null || { echo "::error::bad .cursor-plugin hooks"; exit 1; }
           jq -e '.["ralph-wiggum"].Stop[0].command | startswith("bash ./scripts/stop-hook.sh antigravity")' hooks.json >/dev/null || { echo "::error::bad Antigravity hooks.json"; exit 1; }
+          jq -e '.version == 1 and (.hooks.Stop[0].bash | contains("stop-hook.sh"))' com.github.copilot/hooks/hooks.json >/dev/null || { echo "::error::bad Copilot hooks"; exit 1; }
           test -f hooks/hooks.json -a -d commands
           echo "all manifests valid"
 

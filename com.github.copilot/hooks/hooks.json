@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "Stop": [
+      {
+        "type": "command",
+        "bash": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/stop-hook.sh\"",
+        "timeoutSec": 260
+      }
+    ]
+  }
+}

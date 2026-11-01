@@ -1,5 +1,4 @@
 {
-  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "ralph-wiggum",
   "version": "2.2.0",
   "description": "Autonomous, iterative, self-referential AI development loop.",
@@ -20,12 +19,6 @@
     "com.anysphere.cursor": {
       "hooks": "./hooks/cursor-hooks.json",
       "rules": "./rules"
-    },
-    "com.openai.codex": {
-      "hooks": "./hooks/hooks.json"
-    },
-    "com.github.copilot": {
-      "hooks": "./hooks/hooks.json"
     }
   }
 }
