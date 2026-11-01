@@ -1,0 +1,29 @@
+{
+  "skill_name": "cancel-ralph",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Stop the ralph loop, it keeps going in circles on the same failing test.",
+      "should_trigger": true,
+      "expected_output": "Runs scripts/cancel-ralph.sh once with no arguments and reports its output, for example 'Ralph loop canceled at iteration 4.'. The .ralph folder is deleted. Does not start a new loop or edit code."
+    },
+    {
+      "id": 2,
+      "prompt": "Abort the running Ralph session, I want to take over manually from here.",
+      "should_trigger": true,
+      "expected_output": "Runs scripts/cancel-ralph.sh and confirms that the loop is canceled, so the stop hook no longer blocks the turn."
+    },
+    {
+      "id": 3,
+      "prompt": "How do I cancel a Ralph loop when I'm using Codex?",
+      "should_trigger": false,
+      "expected_output": "Triggers ralph-loop-help or answers directly ($cancel-ralph in Codex) without running cancel-ralph.sh, so an active loop keeps running."
+    },
+    {
+      "id": 4,
+      "prompt": "Stop the dev server running on port 3000.",
+      "should_trigger": false,
+      "expected_output": "Stops the process on port 3000 directly without running cancel-ralph.sh or touching .ralph."
+    }
+  ]
+}
