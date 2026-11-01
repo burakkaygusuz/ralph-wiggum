@@ -116,7 +116,7 @@ Claude Code uses slash commands. Cursor, Antigravity, Codex and Copilot take nat
 
 ```bash
 /ralph-loop "Implement JWT auth in src/auth/." --test-cmd "npm test" --completion-promise "AUTH_GREEN"
-/ralph-loop "Refactor the database client to v2 and fix all deprecation warnings." --max-iterations 8
+/ralph-loop "Refactor the database client to v2 and fix all deprecation warnings." --max-iterations 5
 ```
 
 ```text

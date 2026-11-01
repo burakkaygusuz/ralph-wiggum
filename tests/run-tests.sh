@@ -931,6 +931,16 @@ test_copilot_hooks_layout() {
   jq -e 'has("$schema") | not' "$ROOT/plugin.json" >/dev/null
 }
 
+test_hook_timeouts_cover_lock_and_test() {
+  local need f
+  need=$(( $(sed -n 's/^LOCK_WAIT=\([0-9]*\).*/\1/p' "$ROOT/scripts/stop-hook.sh") + $(sed -n 's/^TEST_TIMEOUT=\([0-9]*\).*/\1/p' "$ROOT/scripts/stop-hook.sh") ))
+  test "$need" -gt 0
+  for f in hooks/hooks.json hooks/cursor-hooks.json hooks.json; do
+    jq -e --argjson n "$need" '[.. | objects | .timeout? | numbers] | length > 0 and all(. > $n)' "$ROOT/$f" >/dev/null
+  done
+  jq -e --argjson n "$need" '.hooks.Stop[0].timeoutSec > $n' "$ROOT/com.github.copilot/hooks/hooks.json" >/dev/null
+}
+
 test_cli_unknown_option_exits_2() {
   local status=0
   "$ROOT/scripts/ralph-cli.sh" --bogus >/dev/null 2>&1 || status=$?
@@ -1146,6 +1156,7 @@ run_test "Setup --help Exits 0 And Creates No State" test_setup_help_exits_zero
 run_test "CLI --help Exits 0 And Creates No State" test_cli_help_exits_zero
 run_test "CLI Unknown Option Exits 2" test_cli_unknown_option_exits_2
 run_test "Copilot Hooks Live In The Namespace Directory" test_copilot_hooks_layout
+run_test "Hook Timeouts Exceed Lock Wait Plus Test Timeout" test_hook_timeouts_cover_lock_and_test
 run_test "Setup Reads --help Only As First Argument" test_setup_help_only_as_first_arg
 run_test "Cancel --help Exits 0 And Keeps State" test_cancel_help_keeps_state
 run_test "Cancel Unknown Option Exits 2 And Keeps State" test_cancel_unknown_option_exits_2
