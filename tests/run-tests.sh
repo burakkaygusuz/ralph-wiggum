@@ -111,13 +111,12 @@ EOF
 }
 
 test_cli_max_iterations_fails() {
-  local agent="$PWD/agent.sh" out
+  local agent="$PWD/agent.sh" out status=0
   printf '#!/usr/bin/env bash\necho "Mock agent turn without a promise"\n' > "$agent"
   chmod +x "$agent"
   "$ROOT/scripts/setup-ralph-loop.sh" "CLI max task" --max-iterations 1 --completion-promise "NEVER_EMITTED"
-  if out=$(AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" 2>&1); then
-    return 1
-  fi
+  out=$(AGENT_BIN="$agent" "$ROOT/scripts/ralph-cli.sh" 2>&1) || status=$?
+  test "$status" -eq 4
   grep -qF "Max iterations (1) reached" <<< "$out"
   if grep -q "finished successfully" <<< "$out"; then
     return 1
@@ -677,10 +676,9 @@ test_cancel_refuses_tracked_state() {
   "$ROOT/scripts/setup-ralph-loop.sh" "Cancel tracked task" --completion-promise "CANCEL" >/dev/null
   git add -f .ralph
   git -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm "track state"
-  local out
-  if out=$("$ROOT/scripts/cancel-ralph.sh" 2>&1); then
-    return 1
-  fi
+  local out status=0
+  out=$("$ROOT/scripts/cancel-ralph.sh" 2>&1) || status=$?
+  test "$status" -eq 3
   grep -q "tracked by git" <<< "$out"
   test -f .ralph/state.env
 }
@@ -899,6 +897,55 @@ test_unknown_option_is_rejected() {
   test ! -f .ralph/state.env
 }
 
+test_setup_help_exits_zero() {
+  local out
+  out=$("$ROOT/scripts/setup-ralph-loop.sh" --help)
+  grep -qF "Usage" <<< "$out"
+  test ! -e .ralph
+}
+
+test_cli_help_exits_zero() {
+  local out
+  out=$("$ROOT/scripts/ralph-cli.sh" --help)
+  grep -qF "Usage" <<< "$out"
+  test ! -e .ralph
+}
+
+test_cli_unknown_option_exits_2() {
+  local status=0
+  "$ROOT/scripts/ralph-cli.sh" --bogus >/dev/null 2>&1 || status=$?
+  test "$status" -eq 2
+}
+
+test_setup_help_only_as_first_arg() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Task" --test-cmd --help >/dev/null
+  test -f .ralph/state.env
+}
+
+test_cancel_help_keeps_state() {
+  "$ROOT/scripts/setup-ralph-loop.sh" "Cancel help task" --completion-promise "CANCEL_HELP" >/dev/null
+  "$ROOT/scripts/cancel-ralph.sh" --help >/dev/null
+  test -f .ralph/state.env
+}
+
+test_cancel_unknown_option_exits_2() {
+  local status=0
+  "$ROOT/scripts/setup-ralph-loop.sh" "Cancel unknown task" --completion-promise "CANCEL_BAD" >/dev/null
+  "$ROOT/scripts/cancel-ralph.sh" --bogus >/dev/null 2>&1 || status=$?
+  test "$status" -eq 2
+  test -f .ralph/state.env
+}
+
+test_setup_exit_codes() {
+  local status=0
+  "$ROOT/scripts/setup-ralph-loop.sh" task --max-iteration 3 >/dev/null 2>&1 || status=$?
+  test "$status" -eq 2
+  "$ROOT/scripts/setup-ralph-loop.sh" "Active task" >/dev/null
+  status=0
+  "$ROOT/scripts/setup-ralph-loop.sh" "Second task" >/dev/null 2>&1 || status=$?
+  test "$status" -eq 3
+}
+
 test_git_context_is_capped() {
   "$ROOT/scripts/setup-ralph-loop.sh" task
   local i
@@ -1075,6 +1122,13 @@ run_test "State And Plan Symlinks Are Refused" test_state_symlinks_are_refused
 run_test "Setup Replaces Planted Symlinks" test_setup_replaces_planted_state_tmp_symlink
 run_test "Prompt File Resolves From Caller Dir" test_prompt_file_resolves_from_caller_dir
 run_test "Unknown Option Is Rejected" test_unknown_option_is_rejected
+run_test "Setup --help Exits 0 And Creates No State" test_setup_help_exits_zero
+run_test "CLI --help Exits 0 And Creates No State" test_cli_help_exits_zero
+run_test "CLI Unknown Option Exits 2" test_cli_unknown_option_exits_2
+run_test "Setup Reads --help Only As First Argument" test_setup_help_only_as_first_arg
+run_test "Cancel --help Exits 0 And Keeps State" test_cancel_help_keeps_state
+run_test "Cancel Unknown Option Exits 2 And Keeps State" test_cancel_unknown_option_exits_2
+run_test "Setup Exits 2 On Usage And 3 On Active Loop" test_setup_exit_codes
 run_test "Git Context Is Capped" test_git_context_is_capped
 run_test "Unmatchable Completion Promise Is Rejected" test_unmatchable_promise_is_rejected
 run_test "Success Gate Requires Passing Tests" test_success_requires_passing_tests

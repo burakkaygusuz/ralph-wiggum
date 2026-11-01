@@ -7,6 +7,8 @@ description: Run an autonomous, iterative development loop using the Ralph Wiggu
 
 > Per Geoffrey Huntley's original post (ghuntley.com/ralph), Ralph is best suited to greenfield work. The original loop has no completion signal by design; the `<promise>` token is an addition of this plugin. The tests and the plan of the operator decide when the work is done.
 
+Requires bash and a git repository with at least one commit.
+
 ## Parameters
 
 - `PROMPT` (required): Task description, architecture requirements, and acceptance criteria.
