@@ -7,6 +7,8 @@ description: Cancel and clean up an active Ralph loop session. Use this skill wh
 
 Aborts any active Ralph loop and cleans up workspace state.
 
+Requires bash.
+
 ## Execution
 
 If `${CLAUDE_PLUGIN_ROOT}` has no value, or the text is still literal, use the absolute path of the folder two levels above this SKILL.md file instead. That folder contains `scripts/`. A relative path can resolve from the workspace, so do not use one. On Copilot CLI this folder is under `~/.copilot/installed-plugins/`.
