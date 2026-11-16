@@ -5,61 +5,61 @@
       "id": 1,
       "prompt": "Run a ralph loop to implement user authentication with JWT, add unit tests, and stop when all tests pass. Max 20 iterations.",
       "should_trigger": true,
-      "expected_output": "Initializes Ralph loop with max_iterations=20. Uses a --test-cmd only if the agent found the project's test command in the repository or asked the user for it; it does not invent one. The loop must NOT be treated as complete from the prompt text or the agent's reply: the stop hook ends the loop only after the test command passes and every plan item in .ralph/fix_plan.md is checked. Until then the agent keeps iterating."
+      "expected_output": "The agent starts a Ralph loop with max_iterations=20. The agent uses a --test-cmd only if it found the project's test command in the repository or asked the user for it. The agent does not invent one. The agent must NOT treat the loop as complete because of the prompt text or its own reply. The stop hook ends the loop only after the test command passes and every plan item in .ralph/fix_plan.md is checked. Until then the agent continues to iterate."
     },
     {
       "id": 2,
       "prompt": "Start iterative development on refactoring the billing service until npm test passes cleanly.",
       "should_trigger": true,
-      "expected_output": "Initializes Ralph loop for autonomous iterative refactoring and verification."
+      "expected_output": "The agent starts a Ralph loop for autonomous iterative refactoring and verification."
     },
     {
       "id": 3,
       "prompt": "Can you explain how the Ralph Wiggum technique works and how the loop knows when to stop?",
       "should_trigger": false,
-      "expected_output": "Triggers ralph-loop-help or provides conceptual guidance without starting an active loop."
+      "expected_output": "The agent triggers ralph-loop-help or gives conceptual guidance. It does not start an active loop."
     },
     {
       "id": 4,
       "prompt": "Fix typo in README line 4",
       "should_trigger": false,
-      "expected_output": "Applies a one-shot fix directly without initializing an autonomous loop."
+      "expected_output": "The agent applies a one-shot fix directly. It does not start an autonomous loop."
     },
     {
       "id": 5,
       "prompt": "Cancel the running loop right now",
       "should_trigger": false,
-      "expected_output": "Triggers cancel-ralph to clean state and abort the active loop."
+      "expected_output": "The agent triggers cancel-ralph to clean up the state and abort the active loop."
     },
     {
       "id": 6,
       "prompt": "Run a test-driven development loop to create a binary search tree in Rust with complete test coverage. Stop when all tests pass.",
       "should_trigger": true,
-      "expected_output": "Initializes Ralph loop with Rust TDD protocol and a cargo test --test-cmd."
+      "expected_output": "The agent starts a Ralph loop with a Rust TDD protocol and a cargo test --test-cmd."
     },
     {
       "id": 7,
       "prompt": "Can you run a bash while loop to check if the server on port 8080 is responding?",
       "should_trigger": false,
-      "expected_output": "Executes a simple bash command/poll directly without starting a Ralph autonomous agent loop."
+      "expected_output": "The agent runs a simple bash command/poll directly. It does not start a Ralph autonomous agent loop."
     },
     {
       "id": 8,
       "prompt": "Keep running cargo check and fixing compiler warnings across src/ until zero warnings remain.",
       "should_trigger": true,
-      "expected_output": "Initializes Ralph loop with cargo check backpressure."
+      "expected_output": "The agent starts a Ralph loop with cargo check backpressure."
     },
     {
       "id": 9,
       "prompt": "What are the latest changes in git status?",
       "should_trigger": false,
-      "expected_output": "Runs git status once directly without initializing a loop."
+      "expected_output": "The agent runs git status once directly. It does not start a loop."
     },
     {
       "id": 10,
       "prompt": "Execute an iterative TDD cycle for implementing OAuth2 refresh token rotation in src/auth.ts with vitest verification.",
       "should_trigger": true,
-      "expected_output": "Initializes Ralph loop with vitest test command and TDD cycle."
+      "expected_output": "The agent starts a Ralph loop with a vitest test command and a TDD cycle."
     }
   ]
 }
