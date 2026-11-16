@@ -3,9 +3,9 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "How does the Ralph loop know when it's done? What does --completion-promise actually do?",
+      "prompt": "How does the Ralph loop know when it's done? Does the agent have to say anything to finish?",
       "should_trigger": true,
-      "expected_output": "Explains that the stop hook ends the loop only when the agent's last reply contains <promise>TEXT</promise>, --test-cmd passes and every plan item in .ralph/fix_plan.md is checked, or when the iteration limit is reached. Without --completion-promise the hook accepts COMPLETE or DONE. Does not run setup-ralph-loop.sh or cancel-ralph.sh."
+      "expected_output": "Explains that the stop hook ends the loop only when --test-cmd passes (or none is set) and every plan item in .ralph/fix_plan.md is checked, or when the iteration limit is reached. The agent's reply is not read, and --completion-promise no longer exists. Does not run setup-ralph-loop.sh or cancel-ralph.sh."
     },
     {
       "id": 2,
@@ -17,7 +17,7 @@
       "id": 3,
       "prompt": "Help me write a good Ralph loop prompt for migrating our API client to v2. We use pytest.",
       "should_trigger": true,
-      "expected_output": "Suggests a prompt with a clear goal and acceptance criteria, --test-cmd \"pytest\", a specific --completion-promise token and a bounded --max-iterations. Shows the command but does not run it."
+      "expected_output": "Suggests a prompt with a clear goal and acceptance criteria, --test-cmd \"pytest\", checkable work items and a bounded --max-iterations. Shows the command but does not run it."
     },
     {
       "id": 4,

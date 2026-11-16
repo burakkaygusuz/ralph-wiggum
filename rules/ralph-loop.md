@@ -32,7 +32,5 @@ A loop is active only while `.ralph/state.env` exists. A `.ralph/fix_plan.md` wi
 6. **Scheduler, Learnings & Plan Update:**
    - Record newly discovered architectural insights and quirks in `Working Memory & Cross-Turn Learnings`.
    - Mark the completed work item as `[x]` and document verification evidence in `.ralph/fix_plan.md`.
-   - Output `<promise>TEXT</promise>` in your last reply **ONLY** when you verified all work items and test criteria. TEXT is the `--completion-promise` value. Without that flag, use `COMPLETE` or `DONE`.
-   - Do not write the promise in `.ralph/fix_plan.md`. The stop hook reads it only from your last reply (`last_assistant_message`, or `lastAssistantMessage` on Grok).
-   - Cursor and Antigravity send no assistant text, so the hook reads no promise there. The loop ends when `--test-cmd` passes and every plan item is `[x]`.
-   - In Cursor and Antigravity, check an item only after you verify it. Always pass `--test-cmd`.
+   - The loop ends when every plan item is `[x]` and `--test-cmd` passes (or none is set). The hook reads nothing from your reply.
+   - Check an item only after you verified it. To keep working, add or leave an unchecked item. Always pass `--test-cmd`.

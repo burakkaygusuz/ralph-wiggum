@@ -15,11 +15,11 @@ Example:
   AGENT_BIN=claude ralph-cli.sh
 
 Exit codes:
-  0    Loop finished: the completion promise was verified
-  1    Unexpected failure: the agent exited non-zero, the hook did not advance the loop, or the state was removed without verification
+  0    Loop finished: the tests passed and every plan item is checked
+  1    Unexpected failure: the agent exited non-zero, or the state was removed without verification
   2    Invalid arguments or usage
   3    Precondition failed: no initialized loop, or another ralph-cli is already running
-  4    Iteration limit reached without a verified promise
+  4    Iteration limit reached without a verified completion
   130  Interrupted by Ctrl-C, TERM or HUP; the loop state is deleted
 EOF
 }
@@ -38,9 +38,8 @@ PLAN_FILE="$STATE_DIR/fix_plan.md"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_BIN="${AGENT_BIN:-claude}"
-STOP_HOOK="$SCRIPT_DIR/stop-hook.sh"
-source "$SCRIPT_DIR/lib/json.sh"
 source "$SCRIPT_DIR/lib/state.sh"
+source "$SCRIPT_DIR/lib/step.sh"
 
 [[ ! -f "$PLAN_FILE" || ! -f "$STATE_FILE" ]] && { echo "Error: Ralph loop not initialized. Run ${SCRIPT_DIR}/setup-ralph-loop.sh first." >&2; exit 3; }
 
@@ -53,7 +52,7 @@ if [[ -f "$PID_FILE" ]]; then
 fi
 
 echo "$$" > "$PID_FILE"
-trap 'rm -f "$PID_FILE"' EXIT
+trap 'rm -f "$PID_FILE"; release_lock' EXIT
 
 # shellcheck disable=SC2329 # called through trap
 cleanup() {
@@ -66,53 +65,50 @@ trap cleanup INT TERM HUP
 read_state
 echo "Starting Ralph Loop on '$PLAN_FILE' with '$AGENT_BIN' (Max: $([[ "$MAX_ITERATIONS" -gt 0 ]] && echo "$MAX_ITERATIONS" || echo unlimited))..."
 
+CALLER_DIR="$PWD"
 CURRENT_PROMPT="$(cat "$PLAN_FILE")"
 EXIT_CODE=0
 
 while :; do
   read_state
-  ITER="$ITERATION"
-  [[ "$MAX_ITERATIONS" -gt 0 && "$ITER" -gt "$MAX_ITERATIONS" ]] && { echo "Max iterations ($MAX_ITERATIONS) reached."; EXIT_CODE=4; break; }
+  [[ "$MAX_ITERATIONS" -gt 0 && "$ITERATION" -gt "$MAX_ITERATIONS" ]] && { echo "Max iterations ($MAX_ITERATIONS) reached."; EXIT_CODE=4; break; }
 
   [[ "$MAX_ITERATIONS" -gt 0 ]] && LIMIT=" of $MAX_ITERATIONS" || LIMIT=""
-  echo "=== [Iteration $ITER$LIMIT] ==="
+  echo "=== [Iteration $ITERATION$LIMIT] ==="
   OUTPUT=$(RALPH_CLI_AGENT=1 "$AGENT_BIN" -p "$CURRENT_PROMPT" </dev/null) || {
-    echo "Agent process exited on iteration $ITER."
+    echo "Agent process exited on iteration $ITERATION."
     EXIT_CODE=1
     break
   }
   printf '%s\n' "$OUTPUT"
 
-  HOOK_ERR_FILE="$(mktemp)"
-  FEEDBACK_FILE="$(mktemp)"
-  printf '{"last_assistant_message":%s}' "$(printf '%s' "$OUTPUT" | json_str)" | RALPH_CLI_AGENT="" CLAUDE_PROJECT_DIR="$PROJECT_ROOT" RALPH_FEEDBACK_FILE="$FEEDBACK_FILE" "$STOP_HOOK" >/dev/null 2>"$HOOK_ERR_FILE" || true
-  HOOK_ERR="$(cat "$HOOK_ERR_FILE")"
-  FEEDBACK="$(cat "$FEEDBACK_FILE")"
-  rm -f "$HOOK_ERR_FILE" "$FEEDBACK_FILE"
-  [[ -n "$HOOK_ERR" ]] && echo "$HOOK_ERR" >&2
-
   if [[ ! -f "$STATE_FILE" ]]; then
-    if grep -q '^Ralph loop: Verified' <<< "$HOOK_ERR"; then
-      echo "Ralph loop finished successfully."
-    else
-      if [[ "$HOOK_ERR" == *"Max iterations"* ]]; then
-        EXIT_CODE=4
-      else
-        echo "Ralph loop: state removed without verification." >&2
-        EXIT_CODE=1
-      fi
-    fi
-    break
-  fi
-
-  read_state
-  if [[ "$ITERATION" -le "$ITER" ]]; then
-    echo "Error: stop hook did not advance the loop past iteration $ITER." >&2
+    echo "Ralph loop: state removed without verification." >&2
     EXIT_CODE=1
     break
   fi
 
-  CURRENT_PROMPT="${FEEDBACK:-$(cat "$PLAN_FILE")}"
+  cd "$PROJECT_ROOT" # the step runs git and the test command from the project root
+  if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
+    echo "Error: $PROJECT_ROOT is no longer inside a git repository." >&2
+    EXIT_CODE=1
+    break
+  fi
+  check_state_safe || { EXIT_CODE=1; break; }
+  lock_state || { echo "Ralph loop: state removed without verification." >&2; EXIT_CODE=1; break; }
+  STEP_STATUS=0
+  ralph_step || STEP_STATUS=$?
+  [[ "$STEP_STATUS" -ne 3 ]] || ralph_advance || STEP_STATUS=1
+  release_lock
+  cd "$CALLER_DIR"
+  case "$STEP_STATUS" in
+    0) echo "Ralph loop finished successfully."; break ;;
+    4) EXIT_CODE=4; break ;;
+    3) ;;
+    *) EXIT_CODE=1; break ;;
+  esac
+
+  CURRENT_PROMPT="$FEEDBACK"
 done
 
 exit "$EXIT_CODE"

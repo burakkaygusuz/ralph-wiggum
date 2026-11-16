@@ -2,7 +2,9 @@
 
 Keep your AI coding agent working until the tests pass.
 
-Ralph Wiggum is a plugin that implements Geoffrey Huntley's [Ralph Technique](https://ghuntley.com/ralph/). A stop hook blocks the agent from ending its turn. The agent keeps working through a plan in `.ralph/fix_plan.md` until your tests pass and it states a completion promise, or until the iteration limit is reached. Cursor and Antigravity need no promise.
+Ralph Wiggum is a plugin that implements Geoffrey Huntley's [Ralph Technique](https://ghuntley.com/ralph/). A stop hook blocks the agent from ending its turn. The agent keeps working through a plan in `.ralph/fix_plan.md` until your tests pass and every plan item is checked, or until the iteration limit is reached. The loop never reads what the agent says: completion is a fact on disk.
+
+> **Breaking change:** `--completion-promise` and the `<promise>` token are removed. Setup now rejects the flag with exit 2. Always pass `--test-cmd`: without it the loop ends as soon as every plan item is checked, and the agent decides that alone.
 
 ## Quickstart
 
@@ -12,7 +14,7 @@ Ralph Wiggum is a plugin that implements Geoffrey Huntley's [Ralph Technique](ht
 ```
 
 ```bash
-/ralph-loop "Implement JWT auth in src/auth/ and make all tests pass." --test-cmd "npm test" --completion-promise "AUTH_GREEN"
+/ralph-loop "Implement JWT auth in src/auth/ and make all tests pass." --test-cmd "npm test"
 ```
 
 Stop at any time with `/cancel-ralph`. Other agents: see [Installation](#installation) and [Host Status](#host-status).
@@ -72,16 +74,16 @@ No stop hook ships. Use `ralph-cli.sh` (see [Headless CLI](#headless-cli)).
 
 ## Host Status
 
-| Host            | Run live                                           | Reads `<promise>` | Notes                                                                                                                         |
-| :-------------- | :------------------------------------------------- | :---------------: | :---------------------------------------------------------------------------------------------------------------------------- |
-| **Claude Code** | Install, loop, cancel                              |        Yes        | The only fully verified host.                                                                                                 |
-| **Antigravity** | Install, full headless loop, cancel (`agy` 1.4.12) |        No         | Stop payloads carry no assistant text. The hook skips stops that carry an `error` or have `fullyIdle` false.                  |
-| **Codex**       | Setup, cancel, stop hook in `codex exec` (0.166.0) |    Not tested     | The hook ran after trust. A `$schema` field in the root `plugin.json` makes Codex load no plugin hooks, so the file omits it. |
-| **Cursor**      | No                                                 |        No         | Follows the Cursor plugin docs. Stop payloads carry no assistant text.                                                        |
-| **Grok Build**  | No                                                 |  Yes (per docs)   | Follows the Grok hook docs; the hook reads `lastAssistantMessage`. Grok ends a turn after 8 continuations.                    |
-| **Copilot**     | No                                                 |   No (per docs)   | Hooks live in `com.github.copilot/hooks/hooks.json`. The Stop payload has no `last_assistant_message`.                        |
+| Host            | Run live                                           | Notes                                                                                                                         |
+| :-------------- | :------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------- |
+| **Claude Code** | Install, loop, cancel                              | The only fully verified host.                                                                                                 |
+| **Antigravity** | Install, full headless loop, cancel (`agy` 1.4.12) | The hook skips stops that carry an `error` or have `fullyIdle` false.                  |
+| **Codex**       | Setup, cancel, stop hook in `codex exec` (0.166.0) | The hook ran after trust. A `$schema` field in the root `plugin.json` makes Codex load no plugin hooks, so the file omits it. |
+| **Cursor**      | No                                                 | Follows the Cursor plugin docs.                                                        |
+| **Grok Build**  | No                                                 | Follows the Grok hook docs. The hook skips session-end stops. Grok ends a turn after 8 continuations.                    |
+| **Copilot**     | No                                                 | Hooks live in `com.github.copilot/hooks/hooks.json`.                        |
 
-Where no assistant text arrives (Cursor, Antigravity), the loop ends in one of two cases. First, `--test-cmd` passes, every plan item is checked and no test file was deleted. Second, the iteration limit is reached. Copilot sends no assistant text either, but the hook has no no-promise path for it, so its loop ends only at the iteration limit.
+On every host the loop ends in one of two cases. First, `--test-cmd` passes (or none is set), every plan item is checked and no test file was deleted. Second, the iteration limit is reached.
 
 ---
 
@@ -103,8 +105,7 @@ Run `<plugin-dir>/scripts/setup-ralph-loop.sh --help` for the usage text and exi
 | :---------------------------- | :--------: | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `PROMPT`                      |  **Yes**   | The task, constraints and goal.                                                                                                                                         |
 | `--max-iterations <N>`        | _Optional_ | Iteration limit (default 10, 0 = unlimited).                                                                                                                            |
-| `--completion-promise <TEXT>` | _Optional_ | Text the hook accepts in `<promise>TEXT</promise>`. Default: `COMPLETE` or `DONE`. No `<`, `\`, `"`, `&`, control characters or edge whitespace.                        |
-| `--test-cmd <COMMAND>`        | _Optional_ | Runs from the repo root on every turn (120 s limit if `timeout` or `gtimeout` is installed). The hook accepts completion only when it exits 0.                          |
+| `--test-cmd <COMMAND>`        | _Optional_ | Runs from the repo root on every turn (120 s limit if `timeout` or `gtimeout` is installed). The hook accepts completion only when it exits 0. Strongly recommended: without it the loop ends as soon as every item is checked.                          |
 | `--prompt-file <PATH>`        | _Optional_ | Read the task from a file (relative to the current directory). Use it for quotes or shell syntax. Not with `PROMPT`. Setup script only; `/ralph-loop` does not take it. |
 | `--force`                     | _Optional_ | Replace the state of an active loop.                                                                                                                                    |
 
@@ -115,12 +116,12 @@ Run `<plugin-dir>/scripts/setup-ralph-loop.sh --help` for the usage text and exi
 Claude Code uses slash commands. Cursor, Antigravity, Codex and Copilot take natural language. Grok Build lists the skills as slash forms.
 
 ```bash
-/ralph-loop "Implement JWT auth in src/auth/." --test-cmd "npm test" --completion-promise "AUTH_GREEN"
+/ralph-loop "Implement JWT auth in src/auth/." --test-cmd "npm test"
 /ralph-loop "Refactor the database client to v2 and fix all deprecation warnings." --max-iterations 5
 ```
 
 ```text
-Run a ralph-loop to implement JWT auth in src/auth/. Verify with 'npm test' and stop only when all tests pass with <promise>AUTH_GREEN</promise>.
+Run a ralph-loop to implement JWT auth in src/auth/. Verify with 'npm test' and stop only when all tests pass and every plan item is checked.
 ```
 
 ### Headless CLI

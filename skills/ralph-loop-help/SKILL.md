@@ -10,14 +10,14 @@ The Ralph loop executes continuous, test-driven iterations over a living impleme
 ## Core Mechanics
 
 - **State & Fix Plan:** `.ralph/state.env` holds the state. `.ralph/fix_plan.md` holds the persistent backlog.
-- **Completion Promise:** The text in the form `<promise>TEXT</promise>`. The agent outputs it only when all criteria pass.
+- **Completion:** The loop ends when every plan item is checked and `--test-cmd` passes. The hook reads nothing from the agent's reply. To keep working, the agent adds or leaves an unchecked item. The old `--completion-promise` flag was removed.
 - **Max Iterations:** Limit on turns (default: 10, 0 for no limit). For unattended runs, use `${CLAUDE_PLUGIN_ROOT}/scripts/ralph-cli.sh`.
 - **Hard Backpressure:** The hook runs `--test-cmd` on every turn. It accepts completion only after the command passes.
 
 ## Prompt Guidelines
 
 1. **Include Verifiable Tests:** Pass `--test-cmd "npm test"` or `--test-cmd "pytest"`.
-2. **Define a Clear Promise:** Use specific tokens like `--completion-promise "AUTH_READY"`.
+2. **Write Checkable Work Items:** The plan decides completion, so state acceptance criteria the agent can verify before it checks an item.
 3. **Bound Total Turns:** Specify `--max-iterations 10` (the default) or a smaller value.
 
 ## Commands & Scripts

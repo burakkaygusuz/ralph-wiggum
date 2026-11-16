@@ -4,20 +4,19 @@ umask 077
 
 usage() {
   cat <<'EOF'
-Usage: setup-ralph-loop.sh [--max-iterations N] [--completion-promise TEXT] [--test-cmd CMD] [--force] (PROMPT... | --prompt-file FILE)
+Usage: setup-ralph-loop.sh [--max-iterations N] [--test-cmd CMD] [--force] (PROMPT... | --prompt-file FILE)
 
 Starts a Ralph loop in the current git repository. Writes .ralph/state.env and .ralph/fix_plan.md.
 
 Options:
   --max-iterations N          Iteration limit (default: 10, 0 = unlimited)
-  --completion-promise TEXT   Text the agent prints in <promise>TEXT</promise> to finish (default: COMPLETE or DONE)
   --test-cmd CMD              Command the stop hook runs from the repo root on every stop, before it accepts completion (120 s limit if timeout or gtimeout is installed; default: none)
   --prompt-file FILE          Read the task from FILE instead of arguments (a relative path resolves from the current directory)
   --force                     Replace an active loop
   -h, --help                  Show this help (first argument only)
 
 Example:
-  setup-ralph-loop.sh --max-iterations 5 --completion-promise DONE --test-cmd "npm test" "Fix the login bug"
+  setup-ralph-loop.sh --max-iterations 5 --test-cmd "npm test" "Fix the login bug"
 
 Exit codes:
   0  Loop initialized
@@ -43,9 +42,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/state.sh"
 
 MAX_ITERATIONS=$DEFAULT_MAX_ITERATIONS
-COMPLETION_PROMISE=""
 TEST_CMD=""
-PROMPT=""
 FORCE=false
 PROMPT_FILE=""
 
@@ -54,7 +51,6 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --force) FORCE=true; shift ;;
     --max-iterations) [[ $# -ge 2 ]] || { echo "Error: --max-iterations requires a value" >&2; exit 2; }; MAX_ITERATIONS="$2"; shift 2 ;;
-    --completion-promise) [[ $# -ge 2 ]] || { echo "Error: --completion-promise requires a value" >&2; exit 2; }; COMPLETION_PROMISE="$2"; shift 2 ;;
     --test-cmd) [[ $# -ge 2 ]] || { echo "Error: --test-cmd requires a value" >&2; exit 2; }; TEST_CMD="$2"; shift 2 ;;
     --prompt-file) [[ $# -ge 2 ]] || { echo "Error: --prompt-file requires a value" >&2; exit 2; }; PROMPT_FILE="$2"; shift 2 ;;
     --*) echo "Error: unknown option $1" >&2; exit 2 ;;
@@ -71,29 +67,13 @@ else
   PROMPT="${prompt_parts[*]:-}"
 fi
 
-if [[ ! "$MAX_ITERATIONS" =~ ^[0-9]+$ ]]; then
-  echo "Error: --max-iterations must be a non-negative integer" >&2
-  exit 2
-fi
+[[ "$MAX_ITERATIONS" =~ ^[0-9]+$ ]] || { echo "Error: --max-iterations must be a non-negative integer" >&2; exit 2; }
 MAX_ITERATIONS=$((10#$MAX_ITERATIONS)) # base 10: a leading zero would otherwise be read as octal
 
-if [[ -z "$PROMPT" ]]; then
-  echo "Error: Prompt cannot be empty" >&2
-  exit 2
-fi
+[[ -n "$PROMPT" ]] || { echo "Error: Prompt cannot be empty" >&2; exit 2; }
+[[ "$TEST_CMD" != *$'\n'* ]] || { echo "Error: --test-cmd must be single-line" >&2; exit 2; }
 
-if [[ "$COMPLETION_PROMISE$TEST_CMD" == *$'\n'* ]]; then
-  echo "Error: --completion-promise and --test-cmd must be single-line" >&2
-  exit 2
-fi
-
-# The stop hook trims whitespace inside <promise> tags and matches the raw JSON text, where these characters are escaped differently
-if [[ "$COMPLETION_PROMISE" == *[\<\\\"\&[:cntrl:]]* ]] || [[ "$COMPLETION_PROMISE" =~ ^[[:space:]]|[[:space:]]$ ]]; then
-  echo "Error: --completion-promise cannot contain '<', '\\', '\"', '&' or control characters, and cannot start or end with whitespace" >&2
-  exit 2
-fi
-
-if [[ -n "$(git -C "$PROJECT_ROOT" ls-files ':(icase).ralph')" ]]; then
+if [[ -n "$(git ls-files ':(icase).ralph')" ]]; then
   echo "Error: .ralph is tracked by git. Untrack it: TEST_COMMAND must not come from the repository." >&2
   exit 3
 fi
@@ -103,7 +83,7 @@ if [[ -f "$STATE_FILE" ]] && [ "$FORCE" = false ]; then
   exit 3
 fi
 
-BASE_COMMIT="$(git -C "$PROJECT_ROOT" rev-parse --verify -q HEAD)" || { echo "Error: Ralph loop needs a commit as its baseline for the test integrity guard." >&2; exit 3; }
+BASE_COMMIT="$(git rev-parse --verify -q HEAD)" || { echo "Error: Ralph loop needs a commit as its baseline for the test integrity guard." >&2; exit 3; }
 
 mkdir -p "$STATE_DIR"
 [[ "$FORCE" = false ]] || rm -rf "$STATE_DIR/.lock"
@@ -117,7 +97,7 @@ cat <<EOF > "$PLAN_FILE"
 ## 1. Specification & Objective
 $PROMPT
 
-> **Completion:** Output \`<promise>${COMPLETION_PROMISE:-COMPLETE}</promise>\` in your final reply only when every work item is checked and verified.
+> **Completion:** The loop ends when every work item is checked and the test command passes. Check an item only after you verified it. To keep working, add or leave an unchecked item.
 
 ## 2. Working Memory & Cross-Turn Learnings
 - [Initial State]: Repository baseline under inspection.
@@ -138,7 +118,6 @@ STATE_TMP="$(mktemp "$STATE_DIR/state.XXXXXX")"
 cat > "$STATE_TMP" <<EOF
 ITERATION=1
 MAX_ITERATIONS=$MAX_ITERATIONS
-COMPLETION_PROMISE=$COMPLETION_PROMISE
 TEST_COMMAND=$TEST_CMD
 BASE_COMMIT=$BASE_COMMIT
 INITIAL_TASK_COUNT=$INITIAL_TASK_COUNT
@@ -146,4 +125,4 @@ STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
 mv "$STATE_TMP" "$STATE_FILE"
 
-echo "Ralph loop initialized (Iteration 1, Max: $([[ "$MAX_ITERATIONS" -gt 0 ]] && echo "$MAX_ITERATIONS" || echo unlimited), Promise: ${COMPLETION_PROMISE:-COMPLETE or DONE})"
+echo "Ralph loop initialized (Iteration 1, Max: $([[ "$MAX_ITERATIONS" -gt 0 ]] && echo "$MAX_ITERATIONS" || echo unlimited))"
