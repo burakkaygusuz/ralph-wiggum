@@ -33,7 +33,7 @@ acquire_lock() {
     tries=$((tries + 1))
     if [ "$tries" -ge $((LOCK_WAIT * 20)) ]; then # 20 tries per second
       rm -rf "$lock" 2>/dev/null || true
-      : > "$lock" 2>/dev/null || true
+      (set -o noclobber; : > "$lock") 2>/dev/null || true # exclusive here too: a plain > follows a planted symlink
       break
     fi
   done
