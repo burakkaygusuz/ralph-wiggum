@@ -3,27 +3,27 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "How does the Ralph loop know when it's done? What does --completion-promise actually do?",
+      "prompt": "How does the Ralph loop know when it's done? Does the agent have to say anything to finish?",
       "should_trigger": true,
-      "expected_output": "Explains that the stop hook ends the loop only when the agent's last reply contains <promise>TEXT</promise>, --test-cmd passes and every plan item in .ralph/fix_plan.md is checked, or when the iteration limit is reached. Without --completion-promise the hook accepts COMPLETE or DONE. Does not run setup-ralph-loop.sh or cancel-ralph.sh."
+      "expected_output": "The agent explains that the stop hook ends the loop in two cases only. First, --test-cmd passes (or none is set) and every plan item in .ralph/fix_plan.md is checked. Second, the iteration limit is reached. The agent also explains that the stop hook does not read the agent's reply and that the --completion-promise flag no longer exists. The agent does not run setup-ralph-loop.sh or cancel-ralph.sh."
     },
     {
       "id": 2,
       "prompt": "What's the difference between --max-iterations 0 and leaving it out? And does --test-cmd run every turn or only at the end?",
       "should_trigger": true,
-      "expected_output": "States that the default is 10 iterations and 0 means no limit, and that the hook runs --test-cmd on every turn and accepts completion only after it passes. Answers without starting a loop."
+      "expected_output": "The agent states that the default is 10 iterations and that 0 means no limit. The agent also states that the hook runs --test-cmd on every turn and accepts completion only after it passes. The agent answers and does not start a loop."
     },
     {
       "id": 3,
       "prompt": "Help me write a good Ralph loop prompt for migrating our API client to v2. We use pytest.",
       "should_trigger": true,
-      "expected_output": "Suggests a prompt with a clear goal and acceptance criteria, --test-cmd \"pytest\", a specific --completion-promise token and a bounded --max-iterations. Shows the command but does not run it."
+      "expected_output": "The agent suggests a prompt with a clear goal and acceptance criteria, --test-cmd \"pytest\", checkable plan items and a --max-iterations value that is not 0. The agent shows the command but does not run it."
     },
     {
       "id": 4,
       "prompt": "Start a ralph loop to fix the flaky tests in tests/api. Max 5 iterations, verify with npm test.",
       "should_trigger": false,
-      "expected_output": "Triggers ralph-loop and initializes a loop with --max-iterations 5 and --test-cmd \"npm test\" instead of only explaining the loop."
+      "expected_output": "The agent triggers ralph-loop and starts a loop with --max-iterations 5 and --test-cmd \"npm test\". An answer that only explains the loop and does not start it is not correct."
     }
   ]
 }
