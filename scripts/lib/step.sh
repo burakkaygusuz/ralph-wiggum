@@ -23,16 +23,17 @@ check_state_safe() {
 # acquire_lock: returns 1 when the state dir vanished while waiting. Callers release with release_lock.
 LOCK_HELD=""
 acquire_lock() {
-  local lock_dir="$STATE_DIR/.lock"
+  local lock="$STATE_DIR/.lock"
   local tries=0
   while :; do
-    mkdir "$lock_dir" 2>/dev/null && break
+    # noclobber makes bash create the file with O_EXCL. mkdir is not a safe lock: uutils mkdir 0.10 (Ubuntu 26.04) lets two racing calls both succeed.
+    (set -o noclobber; : > "$lock") 2>/dev/null && break
     [[ -d "$STATE_DIR" ]] || return 1
     sleep 0.05
     tries=$((tries + 1))
     if [ "$tries" -ge $((LOCK_WAIT * 20)) ]; then # 20 tries per second
-      rm -rf "$lock_dir" 2>/dev/null || true
-      mkdir "$lock_dir" 2>/dev/null || true
+      rm -rf "$lock" 2>/dev/null || true
+      : > "$lock" 2>/dev/null || true
       break
     fi
   done
